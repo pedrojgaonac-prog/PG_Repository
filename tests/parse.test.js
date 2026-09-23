@@ -153,3 +153,53 @@ test('columna extra asignada a un mes y negativos como reintegro', () => {
   assert.deepEqual(extra.filter(t => t.type === 'income').map(t => [t.category, t.amount]).sort(), [['SUELDO', 5000], ['Viene 2025', 700]]);
   assert.ok(extra.every(t => t.date === '2026-03-01'));
 });
+
+// Hoja de Colombia: pagos por mes con marca "X" (pagado), total "Pagado" y bloque de cambio.
+function colombiaSheet() {
+  const m = [];
+  m[0] = [null, null, null, 'Calculo IMA Original', 72.2961, 0.0138];
+  m[1] = ['Traslado 20/01/2026', 6000000];
+  m[2] = ['Traslado 18/02/2026', 6100000];
+  m[4] = ['ph $', '$xUSD', 'fx Cop to PHI', '$xPHI$', 'fx Cop to USD'];
+  m[5] = [100000, 1700, 60, 0.0166, 3529];
+  m[6] = [100000, 1690, 61, 0.0164, 3609];
+  m[8] = [null, 'January', null, 'Febreruary', null, 'Marzo', null];
+  m[9] = ['Credito casa', 5000000, 'X', 5000000, 'X', 5000000, null];
+  m[10] = ['Celular', 60000, 'X', 60000, null, null, null];
+  m[11] = ['4Xmil', 3000, 'X', null, null, null, null];
+  m[13] = ['Pagado', 5063000, null, 5000000, null, 0, null];
+  m[14] = ['En PH$', 84383, null, 81967];
+  return m;
+}
+
+test('libro GASTOS PH: Filipinas, Colombia (pagado/pendiente) y cambio', () => {
+  const r = P.parseGastosPH([{ name: '2026', matrix: budgetSheet() }, { name: 'Mes', matrix: colombiaSheet() }]);
+  assert.ok(r);
+  assert.equal(r.year, 2026);
+  assert.equal(r.ph.sheet, '2026');
+  assert.equal(r.co.sheet, 'Mes');
+  const co = r.co.transactions;
+  const paid = k => co.filter(t => t.date.startsWith(k) && !t.pending).reduce((s, t) => s + t.amount, 0);
+  const pend = k => co.filter(t => t.date.startsWith(k) && t.pending).reduce((s, t) => s + t.amount, 0);
+  assert.equal(paid('2026-01'), 5063000);
+  assert.equal(paid('2026-02'), 5000000);
+  assert.equal(pend('2026-02'), 60000);
+  assert.equal(pend('2026-03'), 5000000);
+  assert.ok(co.every(t => t.type === 'expense'), '"Credito casa" es un gasto, no un ingreso');
+  assert.ok(!co.some(t => /pagado|en ph/i.test(t.category)));
+  assert.deepEqual(r.fx.transfers.map(t => [t.date, t.php, t.usd, t.cop]), [
+    ['2026-01-20', 100000, 1700, 6000000],
+    ['2026-02-18', 100000, 1690, 6100000],
+  ]);
+  assert.equal(r.fx.referenceRate, 72.2961);
+});
+
+test('un libro sin hoja de Colombia no es formato GASTOS PH', () => {
+  assert.equal(P.parseGastosPH([{ name: '2026', matrix: budgetSheet() }]), null);
+});
+
+test('parseMonthHeader tolera errores con loose', () => {
+  assert.equal(P.parseMonthHeader('Febreruary'), null);
+  assert.deepEqual(P.parseMonthHeader('Febreruary', true), { year: null, month: 1 });
+  assert.equal(P.parseMonthHeader('Marca', true), null);
+});

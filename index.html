@@ -24,6 +24,10 @@
       </label>
       <button id="nextMonth" class="icon-btn" aria-label="Mes siguiente">›</button>
     </div>
+    <div class="ledger-switch" id="ledgerSwitch" aria-label="Controlador">
+      <button data-ledger="ph" aria-pressed="true">🇵🇭 Filipinas <small>₱</small></button>
+      <button data-ledger="co" aria-pressed="false">🇨🇴 Colombia <small>COP</small></button>
+    </div>
   </header>
 
   <main>
@@ -36,9 +40,9 @@
       </div>
 
       <div class="kpis needs-data">
-        <div class="kpi"><span class="kpi-label">Gastado este mes</span><span class="kpi-value" id="kpiSpent">–</span><span class="kpi-sub" id="kpiSpentDelta"></span></div>
+        <div class="kpi"><span class="kpi-label">Gastado este mes</span><span class="kpi-value" id="kpiSpent">–</span><span class="kpi-sub" id="kpiSpentDelta"></span><span class="kpi-sub warn-text" id="kpiPending"></span></div>
         <div class="kpi"><span class="kpi-label">Presupuesto restante</span><span class="kpi-value" id="kpiLeft">–</span><span class="kpi-sub" id="kpiLeftSub"></span></div>
-        <div class="kpi"><span class="kpi-label">Ingresos</span><span class="kpi-value" id="kpiIncome">–</span><span class="kpi-sub" id="kpiBalance"></span></div>
+        <div class="kpi"><span class="kpi-label" id="kpiIncomeLabel">Ingresos</span><span class="kpi-value" id="kpiIncome">–</span><span class="kpi-sub" id="kpiBalance"></span></div>
         <div class="kpi"><span class="kpi-label">Promedio 6 meses</span><span class="kpi-value" id="kpiAvg">–</span><span class="kpi-sub" id="kpiProjection"></span></div>
       </div>
 
@@ -74,6 +78,33 @@
       </div>
     </section>
 
+    <!-- CAMBIO -->
+    <section id="view-cambio" class="view">
+      <div id="fxEmpty" class="card empty hidden">
+        <h2>Control del cambio</h2>
+        <p>Registra cada envío de pesos filipinos a Colombia (o importa tu Excel) para seguir la tasa y el saldo en COP.</p>
+        <button class="btn primary" id="fxAddEmpty">+ Transferencia</button>
+      </div>
+      <div class="kpis fx-data">
+        <div class="kpi"><span class="kpi-label">Enviado desde Filipinas</span><span class="kpi-value" id="fxSent">–</span><span class="kpi-sub" id="fxSentSub"></span></div>
+        <div class="kpi"><span class="kpi-label">Recibido en Colombia</span><span class="kpi-value" id="fxReceived">–</span><span class="kpi-sub" id="fxReceivedSub"></span></div>
+        <div class="kpi"><span class="kpi-label">Tasa COP por ₱</span><span class="kpi-value" id="fxRate">–</span><span class="kpi-sub" id="fxRateSub"></span><span class="kpi-sub" id="fxRateRef"></span></div>
+        <div class="kpi"><span class="kpi-label">Saldo del mes en Colombia</span><span class="kpi-value" id="fxBalance">–</span><span class="kpi-sub" id="fxBalanceSub"></span></div>
+      </div>
+      <div class="card fx-data">
+        <h2>Tasa de cambio</h2>
+        <div class="chart-box"><canvas id="chartFx" aria-label="Tasa COP por peso filipino"></canvas></div>
+      </div>
+      <div class="card fx-data">
+        <div class="row-between">
+          <h2>Transferencias</h2>
+          <button class="btn primary" id="fxAdd">+ Transferencia</button>
+        </div>
+        <div class="table-wrap"><table id="fxTable" class="clickable"></table></div>
+        <p class="hint">Gastado = pagos marcados como pagados en el controlador de Colombia. Saldo = recibido − gastado. Toca una fila para editarla.</p>
+      </div>
+    </section>
+
     <!-- IMPORTAR -->
     <section id="view-importar" class="view">
       <div class="card">
@@ -85,9 +116,26 @@
         </label>
       </div>
 
+      <div class="card hidden" id="quickImport">
+        <h2>2. Tu libro de gastos</h2>
+        <ul class="quick-list" id="quickSummary"></ul>
+        <div id="quickExtras"></div>
+        <div class="btn-row">
+          <button class="btn primary" id="quickImportBtn">Importar todo</button>
+          <button class="btn" id="quickManual">Configurar a mano</button>
+        </div>
+        <p class="hint">Reemplaza lo importado antes de este libro; los movimientos agregados a mano se conservan.</p>
+      </div>
+
       <div class="card hidden" id="importStep2">
         <h2>2. Configura cómo leerlo</h2>
         <div class="form-grid">
+          <label>Importar al controlador
+            <select id="importLedger">
+              <option value="ph">🇵🇭 Filipinas</option>
+              <option value="co">🇨🇴 Colombia</option>
+            </select>
+          </label>
           <label>Hoja
             <select id="sheetSelect"></select>
           </label>
@@ -164,20 +212,13 @@
       <div class="card">
         <h2>Preferencias</h2>
         <div class="form-grid">
-          <label>Moneda
-            <select id="currencySelect">
-              <option value="PHP">Peso filipino (₱)</option>
-              <option value="EUR">Euro (€)</option>
-              <option value="USD">Dólar (US$)</option>
-              <option value="MXN">Peso mexicano</option>
-              <option value="COP">Peso colombiano</option>
-              <option value="CLP">Peso chileno</option>
-              <option value="ARS">Peso argentino</option>
-              <option value="PEN">Sol peruano</option>
-              <option value="GBP">Libra (£)</option>
-            </select>
+          <label>Moneda 🇵🇭 Filipinas <select id="currencyPh" data-currency="ph"></select></label>
+          <label>Moneda 🇨🇴 Colombia <select id="currencyCo" data-currency="co"></select></label>
+          <label>Tasa de referencia (COP por ₱)
+            <input type="number" id="fxReference" step="0.0001" min="0" inputmode="decimal" placeholder="Opcional">
           </label>
         </div>
+        <p class="hint">La tasa de referencia sirve para comparar cada envío (como tu "Calculo IMA Original").</p>
       </div>
       <div class="card">
         <h2>Copia de seguridad y otros dispositivos</h2>
@@ -197,9 +238,10 @@
 
   <nav class="tabbar" aria-label="Secciones">
     <button data-view="resumen" class="active"><span aria-hidden="true">◔</span>Resumen</button>
-    <button data-view="movimientos"><span aria-hidden="true">≡</span>Movimientos</button>
+    <button data-view="movimientos"><span aria-hidden="true">≡</span>Gastos</button>
+    <button data-view="cambio"><span aria-hidden="true">⇄</span>Cambio</button>
     <button data-view="importar"><span aria-hidden="true">⇪</span>Importar</button>
-    <button data-view="presupuestos"><span aria-hidden="true">◎</span>Presupuestos</button>
+    <button data-view="presupuestos"><span aria-hidden="true">◎</span>Presup.</button>
     <button data-view="ajustes"><span aria-hidden="true">⚙</span>Ajustes</button>
   </nav>
 
@@ -213,9 +255,27 @@
       <label>Monto <input type="number" name="amount" step="0.01" min="0" required inputmode="decimal"></label>
       <label>Categoría <input type="text" name="category" list="categoryOptions" required></label>
       <label>Descripción <input type="text" name="description"></label>
+      <label class="check"><input type="checkbox" name="pending"> Pendiente de pago</label>
       <datalist id="categoryOptions"></datalist>
       <div class="btn-row">
         <button type="button" class="btn danger hidden" id="txDelete">Eliminar</button>
+        <span class="spacer"></span>
+        <button value="cancel" formnovalidate class="btn">Cancelar</button>
+        <button value="save" class="btn primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="fxDialog">
+    <form method="dialog" id="fxForm">
+      <h2 id="fxDialogTitle">Nueva transferencia</h2>
+      <label>Fecha <input type="date" name="date" required></label>
+      <label>Pesos filipinos enviados (₱) <input type="number" name="php" step="0.01" min="0" required inputmode="decimal"></label>
+      <label>Dólares intermedios (US$, opcional) <input type="number" name="usd" step="0.01" min="0" inputmode="decimal"></label>
+      <label>Pesos colombianos recibidos (COP) <input type="number" name="cop" step="0.01" min="0" required inputmode="decimal"></label>
+      <p class="hint" id="fxFormRate"></p>
+      <div class="btn-row">
+        <button type="button" class="btn danger hidden" id="fxDelete">Eliminar</button>
         <span class="spacer"></span>
         <button value="cancel" formnovalidate class="btn">Cancelar</button>
         <button value="save" class="btn primary">Guardar</button>

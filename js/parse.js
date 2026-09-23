@@ -108,7 +108,7 @@
   /* Interpreta un encabezado de columna como mes. Devuelve {year|null, month} o null.
      Acepta "Enero", "Sept. 2025", "dic-25", "03/2026" y marcas de quincena
      como "ENE 1A Q", "SEP 1q" u "OCT 1 Q". Los números sueltos no son meses. */
-  function parseMonthHeader(v) {
+  function parseMonthHeader(v, loose) {
     if (v instanceof Date) return isNaN(v) ? null : { year: v.getFullYear(), month: v.getMonth() };
     if (typeof v !== 'string') return null;
     const s = normalize(v).replace(/\./g, '');
@@ -119,7 +119,14 @@
     if (m && +m[2] >= 1 && +m[2] <= 12) return { year: +m[1], month: +m[2] - 1 };
 
     const tokens = s.split(/[\s\-/']+/).filter(Boolean);
-    if (!tokens.length || MONTHS[tokens[0]] === undefined) return null;
+    if (!tokens.length) return null;
+    if (MONTHS[tokens[0]] === undefined && loose && /^[a-z]{3,10}$/.test(tokens[0])) {
+      // Tolera errores de tipeo ("Febreruary"): mismo inicio y mismo final que el nombre de un mes.
+      const t = tokens[0];
+      const key = Object.keys(MONTHS).find(k => k.length > 4 && t.slice(0, 3) === k.slice(0, 3) && t.slice(-2) === k.slice(-2));
+      if (key) tokens[0] = key;
+    }
+    if (MONTHS[tokens[0]] === undefined) return null;
     let year = null;
     for (let i = 1; i < tokens.length; i++) {
       const t = tokens[i];
@@ -173,7 +180,7 @@
     return 0;
   }
 
-  const INCOME_WORDS = ['ingreso', 'income', 'abono', 'entrada', 'credito', 'haber', 'deposito', 'sueldo', 'nomina'];
+  const INCOME_WORDS = ['ingreso', 'income', 'entrada', 'deposito', 'sueldo', 'salario', 'nomina'];
 
   function isIncomeLabel(v) {
     const s = normalize(v);
@@ -247,10 +254,11 @@
 
   /* Número de filas de datos a leer: se detiene antes de "RESULTADO"/"Balance",
      que suele cerrar la tabla (lo de abajo son cálculos auxiliares). */
-  function findTableEnd(rows, categoryCol) {
+  function findTableEnd(rows, categoryCol, extraWords) {
+    const words = END_WORDS.concat(extraWords || []);
     for (let i = 0; i < rows.length; i++) {
       const label = normalize((rows[i] || [])[categoryCol]);
-      if (END_WORDS.some(w => label.startsWith(w))) return i;
+      if (words.some(w => label.startsWith(w))) return i;
     }
     return rows.length;
   }
@@ -297,13 +305,15 @@
 
   /* Formato "tabla mensual": categorías en filas, un mes por columna.
      Cada celda se convierte en un movimiento el día 1 de ese mes.
-     opts.extraColumns: { índiceColumna: 'YYYY-MM' } para columnas no-mes que se quieran incluir. */
+     opts.extraColumns: { índiceColumna: 'YYYY-MM' } para columnas no-mes que se quieran incluir.
+     opts.looseMonths: tolera meses mal escritos. opts.defaultSection: 'expense' si todo es gasto.
+     Si la columna a la derecha de un mes lleva marcas "X" (pagado), lo no marcado queda pendiente. */
   function wideToTransactions(headers, rows, categoryCol, fallbackYear, opts) {
     opts = opts || {};
     const monthCols = [];
     headers.forEach((h, i) => {
       if (i === categoryCol) return;
-      const mh = parseMonthHeader(h);
+      const mh = parseMonthHeader(h, opts.looseMonths);
       if (mh) monthCols.push({ index: i, year: mh.year != null ? mh.year : fallbackYear, month: mh.month, label: '' });
     });
     const extra = opts.extraColumns || {};
@@ -312,22 +322,29 @@
       if (y && mo) monthCols.push({ index: +i, year: y, month: mo - 1, label: String(headers[i] || '').trim() });
     });
 
+    const isMark = v => normalize(v) === 'x';
+    const monthIdx = new Set(monthCols.map(c => c.index));
+    const usesMarks = monthCols.some(mc => !monthIdx.has(mc.index + 1) && rows.some(r => r && isMark(r[mc.index + 1])));
+
     const out = [];
     let categories = 0;
     eachCategoryRow(rows, categoryCol, (row, cat, section) => {
       categories++;
+      section = section || opts.defaultSection || null;
       const income = section === 'income' || (section === null && isIncomeLabel(cat));
       for (const mc of monthCols) {
         const amt = parseAmount(row[mc.index]);
         if (isNaN(amt) || Math.abs(amt) < 0.005 || !mc.year) continue;
-        out.push({
+        const tx = {
           date: mc.year + '-' + pad(mc.month + 1) + '-01',
           amount: Math.round(Math.abs(amt) * 100) / 100,
           // Un negativo dentro de gastos es un reintegro: cuenta como ingreso.
           type: income || amt < 0 ? 'income' : 'expense',
           category: cat,
           description: mc.label,
-        });
+        };
+        if (usesMarks && tx.type === 'expense' && !isMark(row[mc.index + 1])) tx.pending = true;
+        out.push(tx);
       }
     });
     return { transactions: withIds(out), skipped: 0, categories, monthColumns: monthCols };
@@ -345,10 +362,118 @@
     return budgets;
   }
 
+  // ---------- Libro "GASTOS PH": Filipinas (₱) + Colombia (COP) + cambio ----------
+
+  function findLabel(matrix, test) {
+    for (let r = 0; r < matrix.length; r++) {
+      const row = matrix[r] || [];
+      for (let c = 0; c < row.length; c++) if (typeof row[c] === 'string' && test(normalize(row[c]))) return { r, c };
+    }
+    return null;
+  }
+
+  function monthHeaderRow(matrix, loose) {
+    let best = -1, bestN = 2;
+    matrix.forEach((row, i) => {
+      const n = (row || []).filter(c => parseMonthHeader(c, loose)).length;
+      if (n > bestN) { bestN = n; best = i; }
+    });
+    return best;
+  }
+
+  /* Hoja de Filipinas: tabla mensual con columna ESTIMADO. */
+  function parsePhSheet(name, matrix, opts) {
+    const h = guessHeaderRow(matrix);
+    if ((matrix[h] || []).filter(c => parseMonthHeader(c)).length < 3) return null;
+    const cat = guessCategoryColumn(matrix, h);
+    const budgetCol = findBudgetColumn(matrix, h, cat);
+    if (budgetCol < 0) return null;
+    const body = matrix.slice(h + 1);
+    const rows = body.slice(0, findTableEnd(body, cat));
+    const year = /^(19|20)\d{2}$/.test(String(name).trim()) ? +String(name).trim() : opts.year;
+    const r = wideToTransactions(matrix[h], rows, cat, year, { extraColumns: opts.extraColumns });
+    return {
+      sheet: name, year,
+      transactions: r.transactions,
+      budgets: wideBudgets(rows, cat, budgetCol),
+      extras: findExtraColumns(matrix[h], rows, cat, budgetCol),
+    };
+  }
+
+  /* Hoja de Colombia: pagos por mes, marcados con "X", que terminan en "Pagado". */
+  function parseCoSheet(name, matrix, year) {
+    const h = monthHeaderRow(matrix, true);
+    if (h < 0) return null;
+    const cat = guessCategoryColumn(matrix, h);
+    const body = matrix.slice(h + 1);
+    const end = findTableEnd(body, cat, ['pagado']);
+    if (end === body.length) return null;
+    const r = wideToTransactions(matrix[h], body.slice(0, end), cat, year, { looseMonths: true, defaultSection: 'expense' });
+    return { sheet: name, transactions: r.transactions };
+  }
+
+  /* Bloque de cambio: encabezados "ph $ | $xUSD | fx Cop to PHI…", una fila por mes desde enero,
+     más las filas "Traslado dd/mm/aaaa" con los COP recibidos. */
+  function parseFx(matrix, year) {
+    const head = findLabel(matrix, s => s === 'ph $');
+    if (!head || normalize((matrix[head.r] || [])[head.c + 1]) !== '$xusd') return null;
+    const received = {};
+    matrix.forEach(row => {
+      (row || []).forEach((cell, c) => {
+        const m = typeof cell === 'string' && normalize(cell).match(/^traslado\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/);
+        const cop = m && parseAmount(row[c + 1]);
+        const date = m && parseDate(m[1]);
+        if (date && cop > 0) received[date.slice(0, 7)] = { date, cop };
+      });
+    });
+    const transfers = [];
+    for (let k = 1; k <= 12; k++) {
+      const row = matrix[head.r + k] || [];
+      const php = parseAmount(row[head.c]);
+      if (!(php > 0)) break;
+      const usd = parseAmount(row[head.c + 1]);
+      const rate = parseAmount(row[head.c + 2]);
+      const key = year + '-' + pad(k);
+      const rec = received[key];
+      const cop = rec ? rec.cop : rate > 0 ? php * rate : NaN;
+      if (!(cop > 0)) continue;
+      const t = { date: rec ? rec.date : key + '-01', php: round2(php), usd: usd > 0 ? round2(usd) : null, cop: round2(cop) };
+      t.id = 'f' + hashString([t.date, t.php, t.cop].join('|'));
+      transfers.push(t);
+    }
+    let referenceRate = null;
+    const ref = findLabel(matrix, s => s.startsWith('calculo ima'));
+    if (ref) {
+      const v = (matrix[ref.r] || []).slice(ref.c + 1).find(x => typeof x === 'number' && x > 1);
+      if (v) referenceRate = round2(v * 10000) / 10000;
+    }
+    return { transfers, referenceRate };
+  }
+
+  function round2(n) { return Math.round(n * 100) / 100; }
+
+  /* Reconoce el libro completo. sheets: [{ name, matrix }]. Devuelve null si no es este formato. */
+  function parseGastosPH(sheets, opts) {
+    opts = opts || {};
+    let ph = null, co = null, fx = null;
+    for (const s of sheets) {
+      if (!ph) ph = parsePhSheet(s.name, s.matrix, { year: opts.year || new Date().getFullYear(), extraColumns: opts.extraColumns });
+      if (ph && ph.sheet === s.name) continue;
+    }
+    const year = ph ? ph.year : opts.year || new Date().getFullYear();
+    for (const s of sheets) {
+      if (ph && s.name === ph.sheet) continue;
+      if (!co) co = parseCoSheet(s.name, s.matrix, year);
+      if (!fx) fx = parseFx(s.matrix, year);
+    }
+    if (!ph || !co) return null;
+    return { year, ph, co, fx: fx || { transfers: [], referenceRate: null } };
+  }
+
   const api = {
     normalize, parseAmount, parseDate, parseMonthHeader, guessMapping, guessHeaderRow,
     rowsToTransactions, wideToTransactions, wideBudgets, guessCategoryColumn, findTableEnd,
-    findBudgetColumn, findExtraColumns, isLabel, txId, withIds, isIncomeLabel, toISODate,
+    findBudgetColumn, findExtraColumns, isLabel, parseGastosPH, parseFx, txId, withIds, isIncomeLabel, toISODate,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Parse = api;

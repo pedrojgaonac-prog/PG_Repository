@@ -6,6 +6,21 @@ funciona sin conexión.
 
 ![Resumen](https://img.shields.io/badge/datos-solo%20en%20tu%20dispositivo-0f766e)
 
+## Dos controladores + control del cambio
+
+- **🇵🇭 Filipinas (₱)**: sueldo, retención, mercado, ahorro, "Gastos Colombia (Transferencias)", etc.
+  Presupuesto = columna ESTIMADO.
+- **🇨🇴 Colombia (COP)**: crédito casa, AV Villas, administraciones, tarjeta… Solo cuenta como
+  gastado lo marcado con **X** (igual que tu fila *Pagado*); lo no marcado aparece como **pendiente**.
+  Lo recibido por cada traslado cuenta como ingreso del mes.
+- **⇄ Cambio**: cada envío de ₱ a Colombia con US$ intermedios, COP recibidos, tasas COP/₱, ₱/US$ y
+  COP/US$, comparación con el mes anterior y con la tasa de referencia ("Calculo IMA Original"),
+  gastado y **saldo en COP** (recibido − pagado) por mes y acumulado. Se pueden agregar envíos a mano.
+
+Con el libro `GASTOS_PH_2026.xlsx` basta elegir el archivo y tocar **Importar todo**: lee la hoja
+`2026` (Filipinas), la hoja `Mes` (Colombia) y el bloque de cambio (`ph $ | $xUSD | fx Cop to PHI…`
+y las filas `Traslado dd/mm/aaaa`).
+
 ## Qué hace
 
 - **Importa tu Excel** (`.xlsx`, `.xls`, `.csv`, `.ods`) y detecta solas las columnas
