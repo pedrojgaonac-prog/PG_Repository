@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Mis Gastos</title>
+  <meta name="description" content="Supervisión de gastos mensuales a partir de tu Excel.">
+  <meta name="theme-color" content="#0f766e">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Mis Gastos">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Mis Gastos</h1>
+    <div class="month-picker">
+      <button id="prevMonth" class="icon-btn" aria-label="Mes anterior">‹</button>
+      <label class="month-label">
+        <span id="monthLabel"></span>
+        <input type="month" id="monthInput" aria-label="Elegir mes">
+      </label>
+      <button id="nextMonth" class="icon-btn" aria-label="Mes siguiente">›</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- RESUMEN -->
+    <section id="view-resumen" class="view active">
+      <div id="emptyState" class="card empty hidden">
+        <h2>Empieza importando tu Excel</h2>
+        <p>Carga tu archivo .xlsx, .xls o .csv. Los datos se guardan solo en este dispositivo.</p>
+        <button class="btn primary" data-goto="importar">Importar Excel</button>
+      </div>
+
+      <div class="kpis needs-data">
+        <div class="kpi"><span class="kpi-label">Gastado este mes</span><span class="kpi-value" id="kpiSpent">–</span><span class="kpi-sub" id="kpiSpentDelta"></span></div>
+        <div class="kpi"><span class="kpi-label">Presupuesto restante</span><span class="kpi-value" id="kpiLeft">–</span><span class="kpi-sub" id="kpiLeftSub"></span></div>
+        <div class="kpi"><span class="kpi-label">Ingresos</span><span class="kpi-value" id="kpiIncome">–</span><span class="kpi-sub" id="kpiBalance"></span></div>
+        <div class="kpi"><span class="kpi-label">Promedio 6 meses</span><span class="kpi-value" id="kpiAvg">–</span><span class="kpi-sub" id="kpiProjection"></span></div>
+      </div>
+
+      <div class="grid-2 needs-data">
+        <div class="card">
+          <h2>Por categoría</h2>
+          <div class="chart-box"><canvas id="chartCategories" aria-label="Gasto por categoría"></canvas></div>
+        </div>
+        <div class="card">
+          <h2>Últimos 12 meses</h2>
+          <div class="chart-box"><canvas id="chartTrend" aria-label="Tendencia mensual"></canvas></div>
+        </div>
+      </div>
+
+      <div class="card needs-data">
+        <h2>Categorías vs. presupuesto</h2>
+        <div id="budgetTable" class="budget-list"></div>
+      </div>
+    </section>
+
+    <!-- MOVIMIENTOS -->
+    <section id="view-movimientos" class="view">
+      <div class="card">
+        <div class="row-between">
+          <h2>Movimientos del mes</h2>
+          <button class="btn primary" id="addTxBtn">+ Agregar</button>
+        </div>
+        <div class="filters">
+          <input type="search" id="txSearch" placeholder="Buscar…" aria-label="Buscar">
+          <select id="txCategoryFilter" aria-label="Filtrar por categoría"><option value="">Todas las categorías</option></select>
+        </div>
+        <div id="txList" class="tx-list"></div>
+      </div>
+    </section>
+
+    <!-- IMPORTAR -->
+    <section id="view-importar" class="view">
+      <div class="card">
+        <h2>1. Selecciona tu archivo</h2>
+        <label class="dropzone" id="dropzone">
+          <input type="file" id="fileInput" accept=".xlsx,.xls,.xlsm,.csv,.ods" hidden>
+          <span>Toca para elegir o arrastra aquí tu Excel</span>
+          <small id="fileName"></small>
+        </label>
+      </div>
+
+      <div class="card hidden" id="importStep2">
+        <h2>2. Configura cómo leerlo</h2>
+        <div class="form-grid">
+          <label>Hoja
+            <select id="sheetSelect"></select>
+          </label>
+          <label>Fila de encabezados
+            <input type="number" id="headerRow" min="1" value="1">
+          </label>
+          <label>Formato de la hoja
+            <select id="layoutSelect">
+              <option value="rows">Una fila por gasto (fecha, categoría, monto…)</option>
+              <option value="wide">Tabla mensual (categorías en filas, meses en columnas)</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="mapRows" class="form-grid">
+          <label>Columna de fecha <select data-map="date"></select></label>
+          <label>Columna de monto <select data-map="amount"></select></label>
+          <label>Columna de categoría <select data-map="category"></select></label>
+          <label>Columna de descripción <select data-map="description"></select></label>
+          <label>Columna de tipo (gasto/ingreso) <select data-map="type"></select></label>
+          <label>Montos negativos significan
+            <select id="negativeMeans">
+              <option value="expense">Gasto</option>
+              <option value="income">Ingreso</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="mapWide" class="form-grid hidden">
+          <label>Columna de categoría <select data-map="wideCategory"></select></label>
+          <label>Año (si los meses no lo indican)
+            <input type="number" id="wideYear" min="1990" max="2100">
+          </label>
+          <p class="hint" id="wideMonthsHint"></p>
+        </div>
+
+        <h3>Vista previa</h3>
+        <div class="table-wrap"><table id="previewTable"></table></div>
+        <p class="hint" id="previewSummary"></p>
+
+        <div class="form-grid">
+          <label>Al importar
+            <select id="importMode">
+              <option value="merge">Agregar (sin duplicar)</option>
+              <option value="replace">Reemplazar todos los datos</option>
+            </select>
+          </label>
+        </div>
+        <button class="btn primary" id="doImport">Importar</button>
+      </div>
+    </section>
+
+    <!-- PRESUPUESTOS -->
+    <section id="view-presupuestos" class="view">
+      <div class="card">
+        <h2>Presupuesto mensual por categoría</h2>
+        <p class="hint">Déjalo vacío si no quieres límite para esa categoría.</p>
+        <div id="budgetForm" class="budget-form"></div>
+        <div class="row-add">
+          <input type="text" id="newCategory" placeholder="Nueva categoría" aria-label="Nueva categoría">
+          <button class="btn" id="addCategoryBtn">Agregar</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- AJUSTES -->
+    <section id="view-ajustes" class="view">
+      <div class="card">
+        <h2>Preferencias</h2>
+        <div class="form-grid">
+          <label>Moneda
+            <select id="currencySelect">
+              <option value="EUR">Euro (€)</option>
+              <option value="USD">Dólar (US$)</option>
+              <option value="MXN">Peso mexicano</option>
+              <option value="COP">Peso colombiano</option>
+              <option value="CLP">Peso chileno</option>
+              <option value="ARS">Peso argentino</option>
+              <option value="PEN">Sol peruano</option>
+              <option value="GBP">Libra (£)</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Copia de seguridad y otros dispositivos</h2>
+        <p class="hint">Los datos viven en este navegador. Para usarlos en otro dispositivo, exporta la copia y ábrela allí, o vuelve a importar tu Excel.</p>
+        <div class="btn-row">
+          <button class="btn" id="exportJson">Exportar copia (.json)</button>
+          <label class="btn">Restaurar copia<input type="file" id="importJson" accept=".json" hidden></label>
+          <button class="btn" id="exportXlsx">Exportar a Excel</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Zona peligrosa</h2>
+        <button class="btn danger" id="clearAll">Borrar todos los datos</button>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabbar" aria-label="Secciones">
+    <button data-view="resumen" class="active"><span aria-hidden="true">◔</span>Resumen</button>
+    <button data-view="movimientos"><span aria-hidden="true">≡</span>Movimientos</button>
+    <button data-view="importar"><span aria-hidden="true">⇪</span>Importar</button>
+    <button data-view="presupuestos"><span aria-hidden="true">◎</span>Presupuestos</button>
+    <button data-view="ajustes"><span aria-hidden="true">⚙</span>Ajustes</button>
+  </nav>
+
+  <dialog id="txDialog">
+    <form method="dialog" id="txForm">
+      <h2 id="txDialogTitle">Nuevo movimiento</h2>
+      <label>Tipo
+        <select name="type"><option value="expense">Gasto</option><option value="income">Ingreso</option></select>
+      </label>
+      <label>Fecha <input type="date" name="date" required></label>
+      <label>Monto <input type="number" name="amount" step="0.01" min="0" required inputmode="decimal"></label>
+      <label>Categoría <input type="text" name="category" list="categoryOptions" required></label>
+      <label>Descripción <input type="text" name="description"></label>
+      <datalist id="categoryOptions"></datalist>
+      <div class="btn-row">
+        <button type="button" class="btn danger hidden" id="txDelete">Eliminar</button>
+        <span class="spacer"></span>
+        <button value="cancel" formnovalidate class="btn">Cancelar</button>
+        <button value="save" class="btn primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="vendor/xlsx.full.min.js"></script>
+  <script src="vendor/chart.umd.min.js"></script>
+  <script src="js/parse.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
