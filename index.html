@@ -121,7 +121,12 @@
           <label>Año (si los meses no lo indican)
             <input type="number" id="wideYear" min="1990" max="2100">
           </label>
-          <p class="hint" id="wideMonthsHint"></p>
+          <label>Leer hasta la fila
+            <input type="number" id="wideEndRow" min="1">
+          </label>
+          <label>Presupuesto mensual desde la columna <select data-map="wideBudget"></select></label>
+          <p class="hint full" id="wideMonthsHint"></p>
+          <div id="wideExtras" class="full"></div>
         </div>
 
         <h3>Vista previa</h3>
@@ -131,6 +136,7 @@
         <div class="form-grid">
           <label>Al importar
             <select id="importMode">
+              <option value="sync">Actualizar lo importado antes desde esta hoja</option>
               <option value="merge">Agregar (sin duplicar)</option>
               <option value="replace">Reemplazar todos los datos</option>
             </select>
@@ -160,6 +166,7 @@
         <div class="form-grid">
           <label>Moneda
             <select id="currencySelect">
+              <option value="PHP">Peso filipino (₱)</option>
               <option value="EUR">Euro (€)</option>
               <option value="USD">Dólar (US$)</option>
               <option value="MXN">Peso mexicano</option>

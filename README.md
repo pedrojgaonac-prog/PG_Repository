@@ -12,7 +12,14 @@ funciona sin conexión.
   de fecha, monto, categoría, descripción y tipo. Puedes corregirlas antes de importar.
 - Soporta dos formatos de hoja:
   1. **Una fila por gasto**: `Fecha | Concepto | Categoría | Importe | Tipo`.
-  2. **Tabla mensual**: categorías en filas y un mes por columna (`Enero`, `Feb 2026`, `03/2026`…).
+  2. **Tabla mensual / presupuesto**: categorías en filas y un mes por columna
+     (`Enero`, `Feb 2026`, `03/2026`, `ENE 1A Q`…). Es el formato de `GASTOS_PH_2026.xlsx`:
+     - detecta la fila de meses, la columna de categorías y las secciones INGRESOS / GASTOS;
+     - toma la columna **ESTIMADO** como presupuesto mensual por categoría;
+     - deja de leer en **RESULTADO** (lo de abajo son cálculos auxiliares);
+     - ignora filas TOTAL y columnas de % y TOTAL;
+     - columnas que no son un mes (p. ej. **Premiums and bonus**) se pueden sumar al mes que elijas o dejar fuera;
+     - los negativos dentro de gastos (p. ej. *Viene 2025*, reintegros) cuentan como ingreso.
 - Entiende montos como `1.234,56`, `$1,234.56`, `(45)` o `-45`, y fechas `dd/mm/aaaa`,
   `aaaa-mm-dd`, `5 de marzo de 2026` o fechas nativas de Excel.
 - **Resumen del mes**: total gastado, variación vs. mes anterior, ingresos y balance,
@@ -21,8 +28,10 @@ funciona sin conexión.
 - **Presupuestos por categoría** con barras de avance (verde / ámbar al 85 % / rojo al pasarse)
   y sugerencia basada en el promedio de los últimos 3 meses.
 - Agregar, editar y borrar movimientos a mano desde el celular.
-- Re-importar el mismo Excel **no duplica** movimientos, así que puedes seguir usando tu
-  Excel como siempre y volver a cargarlo cada mes.
+- Al re-importar, el modo **"Actualizar lo importado antes desde esta hoja"** reemplaza
+  lo que vino de esa hoja por los valores actuales (sin duplicar y sin tocar los
+  movimientos agregados a mano). Así sigues usando tu Excel como siempre y lo vuelves a
+  cargar cuando lo actualices.
 - Exportar a Excel y copia de seguridad en JSON.
 
 ## Privacidad

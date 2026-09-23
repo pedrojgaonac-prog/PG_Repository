@@ -105,7 +105,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 16px; }
   min-width: 0;
 }
 .kpi-label { font-size: .78rem; color: var(--text-muted); }
-.kpi-value { font-size: 1.35rem; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.kpi-value { font-size: clamp(1.05rem, 5vw, 1.35rem); font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kpi-sub { font-size: .75rem; color: var(--text-muted); }
 .good { color: var(--good) !important; }
 .bad { color: var(--bad) !important; }
@@ -158,6 +158,10 @@ main { max-width: 1100px; margin: 0 auto; padding: 16px; }
   display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 12px;
   margin-bottom: 12px;
 }
+
+.form-grid .full { grid-column: 1 / -1; }
+.extra-col { display: grid; grid-template-columns: minmax(0, 1fr) 11em; gap: 12px; align-items: center; margin-top: 8px; font-size: .85rem; }
+.extra-col span { color: var(--text); overflow-wrap: anywhere; }
 
 label { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; color: var(--text-muted); }
 

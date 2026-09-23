@@ -6,7 +6,7 @@
   const $$ = sel => Array.from(document.querySelectorAll(sel));
 
   // ---------- Estado ----------
-  const defaultState = () => ({ transactions: [], budgets: {}, categories: [], settings: { currency: 'EUR' } });
+  const defaultState = () => ({ transactions: [], budgets: {}, categories: [], settings: { currency: 'PHP' } });
 
   let state = load();
   let currentMonth = latestMonth() || monthKey(new Date());
@@ -38,10 +38,16 @@
     return monthKey(new Date(y, m - 1 + delta, 1));
   }
 
-  function latestMonth() {
-    let max = '';
-    for (const t of state.transactions) if (t.date.slice(0, 7) > max) max = t.date.slice(0, 7);
-    return max;
+  // Último mes con gastos (los ingresos futuros ya planeados no cuentan).
+  function latestMonth(txs) {
+    txs = txs || state.transactions;
+    let max = '', maxAny = '';
+    for (const t of txs) {
+      const k = t.date.slice(0, 7);
+      if (k > maxAny) maxAny = k;
+      if (t.type === 'expense' && k > max) max = k;
+    }
+    return max || maxAny;
   }
 
   function monthLabel(key, short) {
@@ -49,9 +55,11 @@
     return new Date(y, m - 1, 1).toLocaleDateString('es', short ? { month: 'short', year: '2-digit' } : { month: 'long', year: 'numeric' });
   }
 
+  // Montos grandes sin decimales: se leen mejor y caben en el celular.
   function fmt(n) {
+    const decimals = Math.abs(n) >= 1000 ? 0 : 2;
     try {
-      return new Intl.NumberFormat('es', { style: 'currency', currency: state.settings.currency, maximumFractionDigits: 2 }).format(n);
+      return new Intl.NumberFormat('es', { style: 'currency', currency: state.settings.currency, currencyDisplay: 'narrowSymbol', minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(n);
     } catch (e) {
       return n.toFixed(2);
     }
@@ -247,7 +255,7 @@
       const spent = byCat[c] || 0;
       const budget = state.budgets[c] || 0;
       const pct = budget ? Math.min(100, (spent / budget) * 100) : 0;
-      const status = !budget ? '' : spent > budget ? 'over' : spent > budget * 0.85 ? 'warn' : 'ok';
+      const status = !budget ? '' : spent > budget * 1.005 ? 'over' : spent > budget * 0.85 ? 'warn' : 'ok';
       return '<div class="budget-row ' + status + '">' +
         '<div class="budget-head"><span class="budget-name">' + escapeHtml(c) + '</span>' +
         '<span class="budget-amt">' + fmt(spent) + (budget ? ' <small>/ ' + fmt(budget) + '</small>' : '') + '</span></div>' +
@@ -409,7 +417,7 @@
 
   function headerLabel(h, i) {
     if (h instanceof Date) return colLetter(i) + ': ' + monthLabel(monthKey(h), true);
-    return colLetter(i) + (h != null ? ': ' + String(h) : '');
+    return colLetter(i) + (Parse.isLabel(h) || Parse.parseMonthHeader(h) ? ': ' + String(h).trim() : '');
   }
 
   function fillMapSelects(mapping) {
@@ -429,12 +437,25 @@
     const guess = Parse.guessMapping(hs.map(h => (h instanceof Date ? '' : h)));
     const wide = monthHeaders >= 3 && guess.date < 0;
     $('#layoutSelect').value = wide ? 'wide' : 'rows';
-    let wideCat = hs.findIndex(h => h != null && !Parse.parseMonthHeader(h));
-    if (guess.category >= 0) wideCat = guess.category;
-    fillMapSelects(Object.assign({}, guess, { wideCategory: wideCat }));
+    const wideCat = Parse.guessCategoryColumn(matrix, headerIndex());
+    const wideBudget = Parse.findBudgetColumn(matrix, headerIndex(), wideCat);
+    fillMapSelects(Object.assign({}, guess, { wideCategory: wideCat, wideBudget }));
     const yearFromHeader = hs.map(Parse.parseMonthHeader).find(m => m && m.year);
-    $('#wideYear').value = yearFromHeader ? yearFromHeader.year : new Date().getFullYear();
+    const sheetYear = /^(19|20)\d{2}$/.test($('#sheetSelect').value.trim()) ? +$('#sheetSelect').value.trim() : null;
+    $('#wideYear').value = yearFromHeader ? yearFromHeader.year : sheetYear || new Date().getFullYear();
+    extraChoices = {};
+    guessEndRow();
     toggleLayout();
+  }
+
+  // Excel row number <-> índice en `matrix`.
+  function excelRow(idx) { return idx + 1 + rowOffset; }
+  function matrixIdx(row) { return row - 1 - rowOffset; }
+
+  function guessEndRow() {
+    const body = matrix.slice(headerIndex() + 1);
+    const end = Parse.findTableEnd(body, currentMap().wideCategory);
+    $('#wideEndRow').value = excelRow(headerIndex() + end);
   }
 
   function toggleLayout() {
@@ -449,16 +470,49 @@
     return m;
   }
 
+  // Columnas que no son meses (p. ej. "Premiums and bonus"): el usuario elige a qué mes asignarlas.
+  let extraChoices = {};
+
+  function renderExtras(extras, year) {
+    const box = $('#wideExtras');
+    if (!extras.length) { box.innerHTML = ''; return; }
+    const months = Array.from({ length: 12 }, (_, i) => year + '-' + String(i + 1).padStart(2, '0'));
+    box.innerHTML = '<p class="hint">Columnas que no son un mes. Puedes sumarlas a un mes o dejarlas fuera:</p>' +
+      extras.map(e => '<label class="extra-col"><span>' + colLetter(e.index) + ': ' + escapeHtml(e.label) + '</span>' +
+        '<select data-extra="' + e.index + '"><option value="">No importar</option>' +
+        months.map(k => '<option value="' + k + '"' + (extraChoices[e.index] === k ? ' selected' : '') + '>' + escapeHtml(monthLabel(k)) + '</option>').join('') +
+        '</select></label>').join('');
+  }
+
+  $('#wideExtras').addEventListener('change', e => {
+    const sel = e.target.closest('[data-extra]');
+    if (!sel) return;
+    if (sel.value) extraChoices[sel.dataset.extra] = sel.value;
+    else delete extraChoices[sel.dataset.extra];
+    updatePreview();
+  });
+
+  let parsedBudgets = {};
+
   function updatePreview() {
-    const body = matrix.slice(headerIndex() + 1);
     const map = currentMap();
+    parsedBudgets = {};
 
     if ($('#layoutSelect').value === 'wide') {
-      parsed = Parse.wideToTransactions(headers(), body, map.wideCategory, +$('#wideYear').value);
-      $('#wideMonthsHint').textContent = parsed.monthColumns.length
-        ? 'Columnas de mes detectadas: ' + parsed.monthColumns.map(c => colLetter(c.index)).join(', ')
-        : 'No se detectaron columnas con nombres de mes (Enero, Feb, 01/2026…).';
+      const endIdx = Math.max(headerIndex(), matrixIdx(+$('#wideEndRow').value || excelRow(matrix.length - 1)));
+      const body = matrix.slice(headerIndex() + 1, endIdx + 1);
+      const year = +$('#wideYear').value;
+      renderExtras(Parse.findExtraColumns(headers(), body, map.wideCategory, map.wideBudget), year);
+      parsed = Parse.wideToTransactions(headers(), body, map.wideCategory, year, { extraColumns: extraChoices });
+      parsedBudgets = Parse.wideBudgets(body, map.wideCategory, map.wideBudget);
+      const nb = Object.keys(parsedBudgets).length;
+      const monthCols = parsed.monthColumns.filter(c => !c.label);
+      $('#wideMonthsHint').textContent = (monthCols.length
+        ? 'Meses detectados: ' + monthCols.map(c => colLetter(c.index) + ' (' + monthLabel(c.year + '-' + String(c.month + 1).padStart(2, '0'), true) + ')').join(', ') + '.'
+        : 'No se detectaron columnas con nombres de mes (Enero, Feb, ENE 1A Q, 01/2026…).') +
+        ' ' + parsed.categories + ' categorías.' + (nb ? ' Se tomarán ' + nb + ' presupuestos mensuales.' : '');
     } else {
+      const body = matrix.slice(headerIndex() + 1);
       const hasNegatives = map.amount >= 0 && body.some(r => r && Parse.parseAmount(r[map.amount]) < 0);
       parsed = Parse.rowsToTransactions(body, map, { negativeMeans: $('#negativeMeans').value, hasNegatives });
     }
@@ -479,27 +533,45 @@
   $('#sheetSelect').addEventListener('change', () => loadSheet(true));
   $('#headerRow').addEventListener('change', () => { fillMapSelects(); guessLayoutAndMapping(); updatePreview(); });
   $('#layoutSelect').addEventListener('change', () => { toggleLayout(); updatePreview(); });
-  $$('[data-map]').forEach(s => s.addEventListener('change', updatePreview));
+  $$('[data-map]').forEach(s => s.addEventListener('change', () => {
+    if (s.dataset.map === 'wideCategory') guessEndRow();
+    updatePreview();
+  }));
   $('#negativeMeans').addEventListener('change', updatePreview);
-  $('#wideYear').addEventListener('change', updatePreview);
+  $('#wideYear').addEventListener('change', () => { extraChoices = {}; updatePreview(); });
+  $('#wideEndRow').addEventListener('change', updatePreview);
 
   $('#doImport').addEventListener('click', () => {
-    const incoming = parsed.transactions;
+    // `source` identifica la hoja de origen, para poder actualizarla al re-importar.
+    const source = $('#layoutSelect').value + ':' + $('#sheetSelect').value;
+    const incoming = parsed.transactions.map(t => Object.assign({}, t, { source }));
     if (!incoming.length) return;
-    let added = incoming.length;
-    if ($('#importMode').value === 'replace') {
+    const mode = $('#importMode').value;
+    let msg;
+    if (mode === 'replace') {
       if (state.transactions.length && !confirm('Se reemplazarán ' + state.transactions.length + ' movimientos existentes. ¿Continuar?')) return;
-      state.transactions = incoming.slice();
+      state.transactions = incoming;
+      msg = incoming.length + ' movimientos importados';
+    } else if (mode === 'sync') {
+      // El Excel manda: lo que vino antes de esta hoja se cambia por lo actual.
+      // Los movimientos agregados a mano (sin `source`) se conservan.
+      const before = state.transactions.filter(t => t.source === source).length;
+      state.transactions = state.transactions.filter(t => t.source !== source).concat(incoming);
+      msg = before ? 'Hoja actualizada: ' + incoming.length + ' movimientos (antes ' + before + ')' : incoming.length + ' movimientos importados';
     } else {
       const ids = new Set(state.transactions.map(t => t.id));
       const fresh = incoming.filter(t => !ids.has(t.id));
-      added = fresh.length;
       state.transactions = state.transactions.concat(fresh);
+      msg = fresh.length + ' movimientos importados' + (fresh.length < incoming.length ? ' (' + (incoming.length - fresh.length) + ' ya existían)' : '');
+    }
+    const nb = Object.keys(parsedBudgets).length;
+    if (nb) {
+      Object.assign(state.budgets, parsedBudgets);
+      msg += ' y ' + nb + ' presupuestos';
     }
     save();
-    toast(added + ' movimientos importados' + (added < incoming.length ? ' (' + (incoming.length - added) + ' ya existían)' : ''));
-    const last = incoming.reduce((m, t) => (t.date > m ? t.date : m), '').slice(0, 7);
-    setMonth(last || currentMonth);
+    toast(msg);
+    setMonth(latestMonth(incoming) || currentMonth);
     showView('resumen');
   });
 

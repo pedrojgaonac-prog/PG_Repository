@@ -34,6 +34,12 @@ test('parseMonthHeader reconoce meses', () => {
   assert.deepEqual(P.parseMonthHeader('Sept. 2025'), { year: 2025, month: 8 });
   assert.deepEqual(P.parseMonthHeader('dic-25'), { year: 2025, month: 11 });
   assert.deepEqual(P.parseMonthHeader('03/2026'), { year: 2026, month: 2 });
+  assert.deepEqual(P.parseMonthHeader('ENE 1A Q'), { year: null, month: 0 });
+  assert.deepEqual(P.parseMonthHeader('SEP 1q'), { year: null, month: 8 });
+  assert.deepEqual(P.parseMonthHeader('OCT 1 Q'), { year: null, month: 9 });
+  assert.equal(P.parseMonthHeader('Premiums and bonus'), null);
+  assert.equal(P.parseMonthHeader('MERCADO'), null);
+  assert.equal(P.parseMonthHeader(51350.6), null);
   assert.equal(P.parseMonthHeader('Categoría'), null);
   assert.equal(P.parseMonthHeader('Total'), null);
 });
@@ -89,4 +95,61 @@ test('wideToTransactions: categorías x meses', () => {
   assert.equal(r.transactions.find(t => t.category === 'Comida').amount, 300.5);
   assert.equal(r.transactions.find(t => t.category === 'Sueldo').type, 'income');
   assert.equal(r.transactions[0].date, '2026-01-01');
+});
+
+// Estructura tipo presupuesto: título, meses con quincena, columna ESTIMADO en la
+// fila de abajo, sección INGRESOS/GASTOS, columna especial y cálculos tras RESULTADO.
+function budgetSheet() {
+  return [
+    [1, 'PRESUPUESTO', 'PRESUPUESTO'],
+    [51350.6, null, null, 'ENE 1A Q', null, 'FEB 1A Q', null, 'Premiums and bonus', null, 'MAR 1Q', null, 'TOTAL'],
+    [71046.6, ' ESTIMADO ', ' REAL ', 'MENSUALIDAD', '% Del Rublo', 'MENSUALIDAD', '% Del Rublo', 'MENSUALIDAD', '%', 'MENSUALIDAD', '%', 'TOTAL'],
+    ['SUELDO', 1000, 1000, 1000, 1, 1100, 1, 5000, 1, 1000, 1, 8100],
+    ['TOTAL INGRESOS', 1000, 1000, 1000, 1, 1100, 1, 5000, 1, 1000, 1, 8100],
+    ['GASTOS'],
+    ['MERCADO', 300, 300, 320, 0.3, 310, 0.3, null, null, 290, 0.3, 920],
+    ['Viene 2025', null, null, null, null, null, null, -700, null, null, null, -700],
+    ['Otros', 50, null, 40, 0.1, null, null, 200, null, 10, 0, 250],
+    [null, null, null, null, null, null, null, 30, null, null, null, 30],
+    ['Otros', 20, null, null, null, 15, null, null, null, null, null, 15],
+    ['TOTAL GASTOS', 370, 300, 360, 1, 325, 1, 230, 1, 300, 1, 1215],
+    ['RESULTADO', 630, 700, 640, null, 775, null, 4770, null, 700, null, 6885],
+    ['SALDO CTA AHORROS', null, 'VALIDADOR', 0, 0, 999, 0],
+    [null, null, null, 'PRESUP', 'EJECUT'],
+    ['DESCUENTOS', 3011089, 0.2, 2913488, 0.2, 2787120, 0.2],
+  ];
+}
+
+test('tabla de presupuesto: encabezado, fin de tabla, estimado y columnas extra', () => {
+  const m = budgetSheet();
+  const h = P.guessHeaderRow(m);
+  assert.equal(h, 1);
+  const cat = P.guessCategoryColumn(m, h);
+  assert.equal(cat, 0);
+  const body = m.slice(h + 1);
+  const end = P.findTableEnd(body, cat);
+  assert.equal(body[end][0], 'RESULTADO');
+  const rows = body.slice(0, end);
+  const budgetCol = P.findBudgetColumn(m, h, cat);
+  assert.equal(budgetCol, 1);
+  assert.deepEqual(P.findExtraColumns(m[h], rows, cat, budgetCol).map(e => e.label), ['Premiums and bonus']);
+
+  const r = P.wideToTransactions(m[h], rows, cat, 2026, {});
+  const sum = (k, type) => r.transactions.filter(t => t.date.startsWith(k) && t.type === type).reduce((s, t) => s + t.amount, 0);
+  assert.equal(sum('2026-01', 'expense'), 360);
+  assert.equal(sum('2026-02', 'expense'), 325);
+  assert.equal(sum('2026-03', 'expense'), 300);
+  assert.equal(sum('2026-01', 'income'), 1000);
+  assert.ok(!r.transactions.some(t => /total|resultado|descuentos|saldo/i.test(t.category)));
+  assert.deepEqual(P.wideBudgets(rows, cat, budgetCol), { MERCADO: 300, Otros: 70 });
+});
+
+test('columna extra asignada a un mes y negativos como reintegro', () => {
+  const m = budgetSheet();
+  const rows = m.slice(2, 12);
+  const r = P.wideToTransactions(m[1], rows, 0, 2026, { extraColumns: { 7: '2026-03' } });
+  const extra = r.transactions.filter(t => t.description === 'Premiums and bonus');
+  assert.equal(extra.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0), 200);
+  assert.deepEqual(extra.filter(t => t.type === 'income').map(t => [t.category, t.amount]).sort(), [['SUELDO', 5000], ['Viene 2025', 700]]);
+  assert.ok(extra.every(t => t.date === '2026-03-01'));
 });

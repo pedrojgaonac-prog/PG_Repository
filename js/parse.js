@@ -105,29 +105,30 @@
     return toISODate(dt);
   }
 
-  /* Interpreta un encabezado de columna como mes. Devuelve {year|null, month} o null. */
+  /* Interpreta un encabezado de columna como mes. Devuelve {year|null, month} o null.
+     Acepta "Enero", "Sept. 2025", "dic-25", "03/2026" y marcas de quincena
+     como "ENE 1A Q", "SEP 1q" u "OCT 1 Q". Los números sueltos no son meses. */
   function parseMonthHeader(v) {
     if (v instanceof Date) return isNaN(v) ? null : { year: v.getFullYear(), month: v.getMonth() };
-    if (typeof v === 'number') {
-      if (v > 20000 && v < 80000) {
-        const d = excelSerialToDate(v);
-        return { year: d.getFullYear(), month: d.getMonth() };
-      }
-      return null;
-    }
+    if (typeof v !== 'string') return null;
     const s = normalize(v).replace(/\./g, '');
     if (!s) return null;
-    let m = s.match(/^([a-z]+)[\s\-/']*(?:de\s+)?(\d{2,4})?$/);
-    if (m && MONTHS[m[1]] !== undefined) {
-      let y = m[2] ? +m[2] : null;
-      if (y !== null && y < 100) y += 2000;
-      return { year: y, month: MONTHS[m[1]] };
-    }
-    m = s.match(/^(\d{1,2})[-/](\d{4})$/);
+    let m = s.match(/^(\d{1,2})[-/](\d{4})$/);
     if (m && +m[1] >= 1 && +m[1] <= 12) return { year: +m[2], month: +m[1] - 1 };
     m = s.match(/^(\d{4})[-/](\d{1,2})$/);
     if (m && +m[2] >= 1 && +m[2] <= 12) return { year: +m[1], month: +m[2] - 1 };
-    return null;
+
+    const tokens = s.split(/[\s\-/']+/).filter(Boolean);
+    if (!tokens.length || MONTHS[tokens[0]] === undefined) return null;
+    let year = null;
+    for (let i = 1; i < tokens.length; i++) {
+      const t = tokens[i];
+      if (/^\d{4}$/.test(t)) year = +t;
+      else if (i === 1 && /^\d{2}$/.test(t) && tokens.length === 2) year = 2000 + +t;
+      else if (t === 'de' || t === 'del' || t === 'quincena') continue;
+      else if (!/^\d{0,2}[a-z]{0,2}$/.test(t)) return null; // "1a", "q", "1q", "2da"…
+    }
+    return { year, month: MONTHS[tokens[0]] };
   }
 
   const GUESS = {
@@ -160,6 +161,10 @@
 
   /* Busca la primera fila que parece un encabezado (>=2 celdas de texto). */
   function guessHeaderRow(matrix) {
+    // Una fila con 3 o más meses es casi seguro el encabezado de una tabla mensual.
+    for (let i = 0; i < Math.min(matrix.length, 20); i++) {
+      if ((matrix[i] || []).filter(c => parseMonthHeader(c)).length >= 3) return i;
+    }
     for (let i = 0; i < Math.min(matrix.length, 20); i++) {
       const row = matrix[i] || [];
       const texts = row.filter(c => typeof c === 'string' && c.trim() && isNaN(parseAmount(c)));
@@ -222,40 +227,128 @@
     return { transactions: withIds(out), skipped };
   }
 
+  // Texto con al menos dos letras ("Viene 2025" sí es etiqueta; "1.234,50" no).
+  function isLabel(v) {
+    return typeof v === 'string' && (v.match(/[a-z\u00c0-\u024f]/gi) || []).length >= 2;
+  }
+
+  const END_WORDS = ['resultado', 'balance', 'diferencia'];
+
+  /* Columna con más etiquetas de texto debajo del encabezado: la de categorías. */
+  function guessCategoryColumn(matrix, headerIdx) {
+    const counts = [];
+    matrix.slice(headerIdx + 1, headerIdx + 60).forEach(row => {
+      (row || []).forEach((c, i) => { if (isLabel(c) && !parseMonthHeader(c)) counts[i] = (counts[i] || 0) + 1; });
+    });
+    let best = 0;
+    counts.forEach((n, i) => { if (n > (counts[best] || 0)) best = i; });
+    return best;
+  }
+
+  /* Número de filas de datos a leer: se detiene antes de "RESULTADO"/"Balance",
+     que suele cerrar la tabla (lo de abajo son cálculos auxiliares). */
+  function findTableEnd(rows, categoryCol) {
+    for (let i = 0; i < rows.length; i++) {
+      const label = normalize((rows[i] || [])[categoryCol]);
+      if (END_WORDS.some(w => label.startsWith(w))) return i;
+    }
+    return rows.length;
+  }
+
+  /* Columna con el presupuesto/estimado mensual (se busca en el encabezado y la fila siguiente). */
+  function findBudgetColumn(matrix, headerIdx, categoryCol) {
+    for (const r of [headerIdx, headerIdx + 1]) {
+      const row = matrix[r] || [];
+      for (let i = 0; i < row.length; i++) {
+        if (i === categoryCol) continue;
+        if (/^(estimado|presupuesto|presup|budget|meta)\b/.test(normalize(row[i]))) return i;
+      }
+    }
+    return -1;
+  }
+
+  /* Columnas con números que no son meses ni totales (p. ej. "Premiums and bonus"). */
+  function findExtraColumns(headers, rows, categoryCol, budgetCol) {
+    const out = [];
+    headers.forEach((h, i) => {
+      if (i === categoryCol || i === budgetCol || !isLabel(h) || parseMonthHeader(h)) return;
+      if (/^(total|%|estimado|presupuesto|real)/.test(normalize(h))) return;
+      if (rows.some(r => r && typeof r[i] === 'number' && r[i] !== 0)) out.push({ index: i, label: String(h).trim() });
+    });
+    return out;
+  }
+
+  /* Recorre las filas de categorías de una tabla mensual llevando la cuenta de
+     la sección (INGRESOS / GASTOS). Llama a fn(row, category, section). */
+  function eachCategoryRow(rows, categoryCol, fn) {
+    let section = null;
+    for (const row of rows) {
+      if (!row || row.every(c => c == null || c === '')) continue;
+      const raw = row[categoryCol];
+      if (!isLabel(raw)) continue;
+      const cat = String(raw).trim();
+      const n = normalize(cat);
+      if (n === 'ingresos' || n === 'ingreso') { section = 'income'; continue; }
+      if (n === 'gastos' || n === 'egresos' || n === 'gasto') { section = 'expense'; continue; }
+      if (/^(total|subtotal)/.test(n)) continue;
+      fn(row, cat, section);
+    }
+  }
+
   /* Formato "tabla mensual": categorías en filas, un mes por columna.
-     Cada celda se convierte en un movimiento el día 1 de ese mes. */
-  function wideToTransactions(headers, rows, categoryCol, fallbackYear) {
+     Cada celda se convierte en un movimiento el día 1 de ese mes.
+     opts.extraColumns: { índiceColumna: 'YYYY-MM' } para columnas no-mes que se quieran incluir. */
+  function wideToTransactions(headers, rows, categoryCol, fallbackYear, opts) {
+    opts = opts || {};
     const monthCols = [];
     headers.forEach((h, i) => {
       if (i === categoryCol) return;
       const mh = parseMonthHeader(h);
-      if (mh) monthCols.push({ index: i, year: mh.year != null ? mh.year : fallbackYear, month: mh.month });
+      if (mh) monthCols.push({ index: i, year: mh.year != null ? mh.year : fallbackYear, month: mh.month, label: '' });
     });
+    const extra = opts.extraColumns || {};
+    Object.keys(extra).forEach(i => {
+      const [y, mo] = String(extra[i]).split('-').map(Number);
+      if (y && mo) monthCols.push({ index: +i, year: y, month: mo - 1, label: String(headers[i] || '').trim() });
+    });
+
     const out = [];
-    let skipped = 0;
-    for (const row of rows) {
-      if (!row || row.every(c => c == null || c === '')) continue;
-      const cat = row[categoryCol] != null ? String(row[categoryCol]).trim() : '';
-      if (!cat || /^total/i.test(normalize(cat))) { skipped++; continue; }
-      const income = isIncomeLabel(cat);
+    let categories = 0;
+    eachCategoryRow(rows, categoryCol, (row, cat, section) => {
+      categories++;
+      const income = section === 'income' || (section === null && isIncomeLabel(cat));
       for (const mc of monthCols) {
         const amt = parseAmount(row[mc.index]);
-        if (isNaN(amt) || amt === 0 || !mc.year) continue;
+        if (isNaN(amt) || Math.abs(amt) < 0.005 || !mc.year) continue;
         out.push({
           date: mc.year + '-' + pad(mc.month + 1) + '-01',
           amount: Math.round(Math.abs(amt) * 100) / 100,
+          // Un negativo dentro de gastos es un reintegro: cuenta como ingreso.
           type: income || amt < 0 ? 'income' : 'expense',
           category: cat,
-          description: '',
+          description: mc.label,
         });
       }
-    }
-    return { transactions: withIds(out), skipped, monthColumns: monthCols };
+    });
+    return { transactions: withIds(out), skipped: 0, categories, monthColumns: monthCols };
+  }
+
+  /* Presupuestos por categoría (solo gastos) a partir de la columna de estimado. */
+  function wideBudgets(rows, categoryCol, budgetCol) {
+    const budgets = {};
+    if (budgetCol < 0) return budgets;
+    eachCategoryRow(rows, categoryCol, (row, cat, section) => {
+      if (section === 'income' || (section === null && isIncomeLabel(cat))) return;
+      const v = parseAmount(row[budgetCol]);
+      if (v > 0) budgets[cat] = Math.round(((budgets[cat] || 0) + v) * 100) / 100;
+    });
+    return budgets;
   }
 
   const api = {
     normalize, parseAmount, parseDate, parseMonthHeader, guessMapping, guessHeaderRow,
-    rowsToTransactions, wideToTransactions, txId, withIds, isIncomeLabel, toISODate,
+    rowsToTransactions, wideToTransactions, wideBudgets, guessCategoryColumn, findTableEnd,
+    findBudgetColumn, findExtraColumns, isLabel, txId, withIds, isIncomeLabel, toISODate,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Parse = api;
