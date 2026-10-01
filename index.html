@@ -33,10 +33,18 @@
   <main>
     <!-- RESUMEN -->
     <section id="view-resumen" class="view active">
+      <div id="backupBanner" class="card banner hidden">
+        <span id="backupBannerText"></span>
+        <button class="btn primary" id="backupNow">Exportar copia</button>
+      </div>
+
       <div id="emptyState" class="card empty hidden">
-        <h2>Empieza importando tu Excel</h2>
-        <p>Carga tu archivo .xlsx, .xls o .csv. Los datos se guardan solo en este dispositivo.</p>
-        <button class="btn primary" data-goto="importar">Importar Excel</button>
+        <h2>Empieza a registrar tus gastos</h2>
+        <p>Toca <b>+</b> para anotar un gasto, o importa un Excel si ya tienes datos. Todo se guarda en este dispositivo.</p>
+        <div class="btn-row center">
+          <button class="btn primary" id="emptyAdd">+ Agregar gasto</button>
+          <button class="btn" data-goto="importar">Importar Excel</button>
+        </div>
       </div>
 
       <div class="kpis needs-data">
@@ -69,6 +77,9 @@
         <div class="row-between">
           <h2>Movimientos del mes</h2>
           <button class="btn primary" id="addTxBtn">+ Agregar</button>
+        </div>
+        <div class="btn-row repeat-row">
+          <button class="btn" id="repeatMonthBtn">↻ Repetir gastos del mes anterior</button>
         </div>
         <div class="filters">
           <input type="search" id="txSearch" placeholder="Buscar…" aria-label="Buscar">
@@ -221,13 +232,15 @@
         <p class="hint">La tasa de referencia sirve para comparar cada envío (como tu "Calculo IMA Original").</p>
       </div>
       <div class="card">
-        <h2>Copia de seguridad y otros dispositivos</h2>
-        <p class="hint">Los datos viven en este navegador. Para usarlos en otro dispositivo, exporta la copia y ábrela allí, o vuelve a importar tu Excel.</p>
+        <h2>Exportar y copia de seguridad</h2>
+        <p class="hint"><b>Exportar a Excel</b> crea un archivo con tus movimientos, un resumen por categoría y mes, los presupuestos y el cambio. En el celular se abre el menú para compartirlo (WhatsApp, correo, Archivos, Drive…).</p>
+        <p class="hint"><b>Copia de seguridad</b> guarda todo (incluidos presupuestos y transferencias) para restaurarlo aquí o pasarlo a otro dispositivo. Los datos viven solo en este dispositivo: haz una copia de vez en cuando.</p>
         <div class="btn-row">
-          <button class="btn" id="exportJson">Exportar copia (.json)</button>
-          <label class="btn">Restaurar copia<input type="file" id="importJson" accept=".json" hidden></label>
-          <button class="btn" id="exportXlsx">Exportar a Excel</button>
+          <button class="btn primary" id="exportXlsx">Exportar a Excel</button>
+          <button class="btn" id="exportJson">Copia de seguridad</button>
+          <label class="btn">Restaurar copia<input type="file" id="importJson" accept=".json,application/json" hidden></label>
         </div>
+        <p class="hint" id="lastBackupText"></p>
       </div>
       <div class="card">
         <h2>Zona peligrosa</h2>
@@ -244,6 +257,8 @@
     <button data-view="presupuestos"><span aria-hidden="true">◎</span>Presup.</button>
     <button data-view="ajustes"><span aria-hidden="true">⚙</span>Ajustes</button>
   </nav>
+
+  <button class="fab" id="fabAdd" aria-label="Agregar gasto">+</button>
 
   <dialog id="txDialog">
     <form method="dialog" id="txForm">

@@ -27,6 +27,7 @@
       for (const k of ['ph', 'co']) Object.assign(st.ledgers[k], data.ledgers[k] || {});
       st.active = data.active === 'co' ? 'co' : 'ph';
       Object.assign(st.fx, data.fx || {});
+      st.lastBackup = data.lastBackup || null;
     } else if (data && Array.isArray(data.transactions)) {
       // Versión anterior (un solo controlador): pasa a Filipinas.
       Object.assign(st.ledgers.ph, {
@@ -145,6 +146,7 @@
     $$('.tabbar button').forEach(b => b.classList.toggle('active', b.dataset.view === name));
     $('.month-picker').style.visibility = ['resumen', 'movimientos', 'cambio'].includes(name) ? 'visible' : 'hidden';
     $('#ledgerSwitch').classList.toggle('hidden', !['resumen', 'movimientos', 'presupuestos'].includes(name));
+    $('#fabAdd').classList.toggle('hidden', !['resumen', 'movimientos'].includes(name));
     if (name === 'presupuestos') renderBudgetForm();
     if (name === 'cambio') renderFx();
     window.scrollTo(0, 0);
@@ -181,6 +183,7 @@
     renderTxList();
     renderCategoryOptions();
     if (currentView === 'cambio') renderFx();
+    renderBackupInfo();
     fitKpis();
   }
 
@@ -367,8 +370,8 @@
       const d = new Date(t.date + 'T00:00:00').toLocaleDateString('es', { day: '2-digit', month: 'short' });
       return '<button class="tx" data-id="' + t.id + '">' +
         '<span class="tx-date">' + d + '</span>' +
-        '<span class="tx-main"><span class="tx-desc">' + escapeHtml(t.description || t.category) + (t.pending ? '<span class="tx-badge">pendiente</span>' : '') + '</span>' +
-        '<span class="tx-cat">' + escapeHtml(t.category) + '</span></span>' +
+        '<span class="tx-main"><span class="tx-desc">' + escapeHtml(t.description || t.category) + '</span>' +
+        '<span class="tx-cat">' + (t.pending ? '<span class="tx-badge first">pendiente</span>' : '') + escapeHtml(t.description ? t.category : '') + '</span></span>' +
         '<span class="tx-amt ' + t.type + (t.pending ? ' pending' : '') + '">' + (t.type === 'income' ? '+' : '−') + fmt(t.amount) + '</span></button>';
     }).join('');
   }
@@ -380,6 +383,31 @@
     if (b) openTxDialog(L().transactions.find(t => t.id === b.dataset.id));
   });
   $('#addTxBtn').addEventListener('click', () => openTxDialog(null));
+  $('#fabAdd').addEventListener('click', () => openTxDialog(null));
+  $('#emptyAdd').addEventListener('click', () => openTxDialog(null));
+
+  // Copia los gastos del mes anterior como pendientes (gastos fijos: crédito, administración…).
+  // No duplica los que ya estén anotados este mes con la misma categoría y descripción.
+  $('#repeatMonthBtn').addEventListener('click', () => {
+    const prevKey = shiftMonth(currentMonth, -1);
+    const prev = txOfMonth(prevKey).filter(t => t.type === 'expense');
+    if (!prev.length) { toast('No hay gastos en ' + monthLabel(prevKey)); return; }
+    const key = t => Parse.normalize(t.category + '|' + t.description);
+    const have = new Set(txOfMonth(currentMonth).filter(t => t.type === 'expense').map(key));
+    const [y, m] = currentMonth.split('-').map(Number);
+    const lastDay = new Date(y, m, 0).getDate();
+    const copies = prev.filter(t => !have.has(key(t))).map((t, i) => ({
+      id: 'm' + Date.now().toString(36) + i.toString(36) + Math.random().toString(36).slice(2, 5),
+      date: currentMonth + '-' + String(Math.min(+t.date.slice(8, 10), lastDay)).padStart(2, '0'),
+      amount: t.amount, type: 'expense', category: t.category, description: t.description, pending: true,
+    }));
+    if (!copies.length) { toast('Los gastos de ' + monthLabel(prevKey) + ' ya están en este mes'); return; }
+    if (!confirm('Se agregarán ' + copies.length + ' gastos de ' + monthLabel(prevKey) + ' como pendientes. Luego ajusta el monto y desmarca "pendiente" al pagar. ¿Continuar?')) return;
+    L().transactions = L().transactions.concat(copies);
+    save();
+    render();
+    toast(copies.length + ' gastos agregados como pendientes');
+  });
 
   function defaultDate() {
     const today = new Date();
@@ -979,18 +1007,54 @@
     save();
   });
 
-  function download(name, blob) {
+  // Comparte el archivo (menú del celular) o, si no se puede, lo descarga.
+  async function saveFile(name, blob) {
+    const file = typeof File !== 'undefined' ? new File([blob], name, { type: blob.type }) : null;
+    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: name });
+        return true;
+      } catch (e) {
+        if (e && e.name === 'AbortError') return false;
+      }
+    }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = name;
     document.body.appendChild(a);
     a.click();
-    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    return true;
   }
 
-  $('#exportJson').addEventListener('click', () => {
-    download('mis-gastos-' + Parse.toISODate(new Date()) + '.json', new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }));
-  });
+  function markBackup() {
+    state.lastBackup = new Date().toISOString();
+    save();
+    renderBackupInfo();
+  }
+
+  // Aviso si hay datos y no se ha hecho copia en más de 14 días.
+  function renderBackupInfo() {
+    const last = state.lastBackup ? new Date(state.lastBackup) : null;
+    const days = last ? Math.floor((Date.now() - last) / 86400000) : null;
+    $('#lastBackupText').textContent = last
+      ? 'Última copia o exportación: ' + last.toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' }) + (days ? ' (hace ' + days + ' días)' : ' (hoy)')
+      : 'Aún no has hecho ninguna copia.';
+    const hasData = state.ledgers.ph.transactions.length + state.ledgers.co.transactions.length > 0;
+    const show = hasData && (days === null || days >= 14);
+    $('#backupBanner').classList.toggle('hidden', !show);
+    $('#backupBannerText').textContent = days === null
+      ? 'Tus datos solo están en este dispositivo. Haz una copia de seguridad.'
+      : 'Hace ' + days + ' días de tu última copia. Haz una nueva.';
+  }
+
+  function exportBackup() {
+    const name = 'mis-gastos-copia-' + Parse.toISODate(new Date()) + '.json';
+    saveFile(name, new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }))
+      .then(ok => { if (ok) { markBackup(); toast('Copia de seguridad lista'); } });
+  }
+  $('#exportJson').addEventListener('click', exportBackup);
+  $('#backupNow').addEventListener('click', exportBackup);
 
   $('#importJson').addEventListener('change', e => {
     const file = e.target.files[0];
@@ -1001,32 +1065,67 @@
       if (!data.ledgers && !Array.isArray(data.transactions)) throw new Error('formato no válido');
       if (!confirm('Se reemplazarán los datos actuales por la copia. ¿Continuar?')) return;
       state = normalizeState(data);
+      state.lastBackup = data.lastBackup || null;
       save();
       renderSettings();
+      renderBackupInfo();
       setLedger(state.active);
       setMonth(latestMonth() || currentMonth);
       toast('Copia restaurada');
     }).catch(err => toast('No se pudo restaurar: ' + err.message));
   });
 
+  // Hoja tipo "tu Excel": categorías en filas, meses en columnas (solo pagado), con totales.
+  function monthlySummarySheet(lg) {
+    const paid = lg.transactions.filter(t => !t.pending);
+    const months = Array.from(new Set(paid.map(t => t.date.slice(0, 7)))).sort();
+    const sum = (type, cat, k) => paid.reduce((s, t) => s + (t.type === type && (cat === null || t.category === cat) && t.date.startsWith(k) ? t.amount : 0), 0);
+    const cats = type => Array.from(new Set(paid.filter(t => t.type === type).map(t => t.category))).sort((a, b) => a.localeCompare(b, 'es'));
+    const head = ['Categoría', 'Presupuesto'].concat(months.map(k => monthLabel(k, true)), ['Total']);
+    const row = (label, budget, vals) => [label, budget].concat(vals, [Math.round(vals.reduce((a, b) => a + b, 0) * 100) / 100]);
+    const round = v => Math.round(v * 100) / 100;
+    const aoa = [head];
+    const incomeCats = cats('income');
+    if (incomeCats.length) {
+      aoa.push(['INGRESOS']);
+      incomeCats.forEach(c => aoa.push(row(c, null, months.map(k => round(sum('income', c, k))))));
+      aoa.push(row('TOTAL INGRESOS', null, months.map(k => round(sum('income', null, k)))));
+      aoa.push([]);
+    }
+    aoa.push(['GASTOS']);
+    cats('expense').forEach(c => aoa.push(row(c, lg.budgets[c] || null, months.map(k => round(sum('expense', c, k))))));
+    const totalBudget = Object.values(lg.budgets).reduce((s, v) => s + (v || 0), 0) || null;
+    aoa.push(row('TOTAL GASTOS', totalBudget, months.map(k => round(sum('expense', null, k)))));
+    if (incomeCats.length) aoa.push(row('RESULTADO', null, months.map(k => round(sum('income', null, k) - sum('expense', null, k)))));
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [{ wch: 30 }, { wch: 12 }].concat(months.map(() => ({ wch: 12 })), [{ wch: 13 }]);
+    return ws;
+  }
+
   $('#exportXlsx').addEventListener('click', () => {
     const wb = XLSX.utils.book_new();
     for (const key of ['ph', 'co']) {
       const lg = state.ledgers[key];
+      if (!lg.transactions.length) continue;
+      XLSX.utils.book_append_sheet(wb, monthlySummarySheet(lg), 'Resumen ' + lg.name);
       const rows = lg.transactions.slice().sort((a, b) => a.date.localeCompare(b.date)).map(t => ({
         Fecha: t.date, Tipo: t.type === 'income' ? 'Ingreso' : 'Gasto', Estado: t.pending ? 'Pendiente' : 'Pagado',
         Categoría: t.category, Descripción: t.description, ['Monto ' + lg.currency]: t.amount,
       }));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), lg.name);
-      const budgets = Object.entries(lg.budgets).map(([c, v]) => ({ Categoría: c, ['Presupuesto mensual ' + lg.currency]: v }));
-      if (budgets.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(budgets), 'Presupuestos ' + lg.name);
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws['!cols'] = [{ wch: 11 }, { wch: 8 }, { wch: 10 }, { wch: 28 }, { wch: 28 }, { wch: 14 }];
+      XLSX.utils.book_append_sheet(wb, ws, 'Movimientos ' + lg.name);
     }
     const fx = fxRows().map(r => ({
       Fecha: r.date, 'Enviado PHP': r.php, 'US$': r.usd, 'Recibido COP': r.cop, 'COP por PHP': Math.round(r.rate * 10000) / 10000,
       'Gastado COP': r.spent, 'Saldo COP': r.balance,
     }));
     if (fx.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(fx), 'Cambio');
-    XLSX.writeFile(wb, 'mis-gastos-' + Parse.toISODate(new Date()) + '.xlsx');
+    if (!wb.SheetNames.length) { toast('Aún no hay datos para exportar'); return; }
+    const data = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveFile('mis-gastos-' + Parse.toISODate(new Date()) + '.xlsx', blob)
+      .then(ok => { if (ok) { markBackup(); toast('Excel exportado'); } });
   });
 
   $('#clearAll').addEventListener('click', () => {
@@ -1034,6 +1133,7 @@
     state = defaultState();
     save();
     renderSettings();
+    renderBackupInfo();
     setLedger('ph');
     toast('Datos borrados');
   });
@@ -1047,7 +1147,11 @@
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 
+  // Pide al navegador que no borre los datos por falta de espacio.
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+
   renderSettings();
+  renderBackupInfo();
   setLedger(state.active);
   setMonth(currentMonth);
 })();

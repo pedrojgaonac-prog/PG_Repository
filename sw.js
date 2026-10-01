@@ -1,5 +1,5 @@
 /* Service worker: permite abrir la app sin conexión. Sube la versión al cambiar archivos. */
-const CACHE = 'mis-gastos-v3';
+const CACHE = 'mis-gastos-v4';
 const ASSETS = [
   './',
   'index.html',

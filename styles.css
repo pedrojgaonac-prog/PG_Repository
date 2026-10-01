@@ -260,3 +260,17 @@ dialog h2 { margin: 0; }
   transition: opacity .2s, transform .2s; max-width: calc(100vw - 32px);
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+.fab {
+  position: fixed; right: 16px; bottom: calc(72px + env(safe-area-inset-bottom)); z-index: 6;
+  width: 56px; height: 56px; border-radius: 50%; border: 0;
+  background: var(--accent); color: var(--accent-contrast);
+  font-size: 2rem; line-height: 1; cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .25);
+}
+.banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-color: var(--warn); }
+.banner span { font-size: .9rem; }
+.btn-row.center { justify-content: center; }
+.repeat-row { margin: -4px 0 12px; }
+.repeat-row .btn { font-size: .85rem; min-height: 34px; padding: 6px 12px; }
+.tx-badge.first { margin: 0 6px 0 0; }

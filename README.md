@@ -21,6 +21,17 @@ Con el libro `GASTOS_PH_2026.xlsx` basta elegir el archivo y tocar **Importar to
 `2026` (Filipinas), la hoja `Mes` (Colombia) y el bloque de cambio (`ph $ | $xUSD | fx Cop to PHI…`
 y las filas `Traslado dd/mm/aaaa`).
 
+## Uso diario desde el celular (sin Excel)
+
+- Botón **+** flotante para anotar un gasto en dos toques (fecha de hoy, categoría con autocompletar).
+- **↻ Repetir gastos del mes anterior** (pestaña Gastos): copia los gastos fijos al mes actual como
+  *pendientes*; al pagar cada uno, se abre y se desmarca "Pendiente de pago".
+- **Ajustes → Exportar a Excel**: en el celular abre el menú de compartir (WhatsApp, correo, Archivos,
+  Drive). El archivo trae por cada controlador un *Resumen* (categorías × meses con presupuesto,
+  totales y resultado) y los *Movimientos*, más la hoja *Cambio*.
+- **Copia de seguridad** (.json) para restaurar o pasar los datos a otro dispositivo. La app avisa si
+  pasan más de 14 días sin copia y pide al navegador guardar los datos de forma persistente.
+
 ## Qué hace
 
 - **Importa tu Excel** (`.xlsx`, `.xls`, `.csv`, `.ods`) y detecta solas las columnas
