@@ -293,8 +293,10 @@
     for (const row of rows) {
       if (!row || row.every(c => c == null || c === '')) continue;
       const raw = row[categoryCol];
-      if (!isLabel(raw)) continue;
-      const cat = String(raw).trim();
+      // Fila sin nombre pero con montos: se conserva para que los totales cuadren.
+      const unnamed = raw == null && row.some((c, i) => i !== categoryCol && typeof c === 'number' && c !== 0);
+      if (!isLabel(raw) && !unnamed) continue;
+      const cat = unnamed ? 'Sin nombre' : String(raw).trim();
       const n = normalize(cat);
       if (n === 'ingresos' || n === 'ingreso') { section = 'income'; continue; }
       if (n === 'gastos' || n === 'egresos' || n === 'gasto') { section = 'expense'; continue; }
@@ -367,7 +369,7 @@
   function findLabel(matrix, test) {
     for (let r = 0; r < matrix.length; r++) {
       const row = matrix[r] || [];
-      for (let c = 0; c < row.length; c++) if (typeof row[c] === 'string' && test(normalize(row[c]))) return { r, c };
+      for (let c = 0; c < row.length; c++) if (typeof row[c] === 'string' && test(normalize(row[c]), r, c)) return { r, c };
     }
     return null;
   }
@@ -392,11 +394,24 @@
     const rows = body.slice(0, findTableEnd(body, cat));
     const year = /^(19|20)\d{2}$/.test(String(name).trim()) ? +String(name).trim() : opts.year;
     const r = wideToTransactions(matrix[h], rows, cat, year, { extraColumns: opts.extraColumns });
+    const extras = findExtraColumns(matrix[h], rows, cat, budgetCol);
+    // Columnas especiales (p. ej. "Premiums and bonus"): movimientos extraordinarios, fuera de los
+    // meses. Se fechan en el mes que sigue a la columna de mes anterior.
+    const extraTransactions = [];
+    for (const e of extras) {
+      let prev = -1;
+      matrix[h].forEach((c, i) => { const mh = i < e.index && parseMonthHeader(c); if (mh) prev = mh.month; });
+      const month = Math.min(11, prev + 1);
+      const only = matrix[h].map((c, i) => (i === cat || i === e.index ? c : null));
+      const xr = wideToTransactions(only, rows, cat, year, { extraColumns: { [e.index]: year + '-' + pad(month + 1) } });
+      xr.transactions.forEach(t => { t.extra = true; t.id = 'e' + t.id; extraTransactions.push(t); });
+    }
     return {
       sheet: name, year,
       transactions: r.transactions,
+      extraTransactions,
       budgets: wideBudgets(rows, cat, budgetCol),
-      extras: findExtraColumns(matrix[h], rows, cat, budgetCol),
+      extras,
     };
   }
 
@@ -452,6 +467,84 @@
 
   function round2(n) { return Math.round(n * 100) / 100; }
 
+  /* Fondo de primas: aportes encima de "GASTOS Primas" (misma columna) y usos debajo.
+     Los usos que mencionan CDT son traslados a inversión. También lee "CDT Investments". */
+  function parseSavings(matrix, year) {
+    // El encabezado de la lista de usos no tiene un monto al lado (el del resumen sí).
+    const head = findLabel(matrix, (s, r, c) => s === 'gastos primas' && typeof (matrix[r] || [])[c + 1] !== 'number');
+    const moves = [];
+    if (head) {
+      const at = (r, c) => (matrix[r] || [])[c];
+      const add = (r, type) => {
+        const label = at(r, head.c), amt = parseAmount(at(r, head.c + 1));
+        if (!isLabel(label) || !(amt > 0)) return;
+        const concept = String(label).trim();
+        const dm = concept.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})/);
+        const date = (dm && parseDate(dm[1])) || year + '-01-01';
+        const t = { date, type, concept, amount: round2(amt) };
+        if (type === 'out' && /\bcdt\b/i.test(concept)) t.invest = true;
+        t.id = 's' + hashString([type, concept, t.amount, r].join('|'));
+        moves.push(t);
+      };
+      for (let r = Math.max(0, head.r - 30); r < head.r; r++) add(r, 'in');
+      for (let r = head.r + 1; r <= head.r + 20; r++) add(r, 'out');
+    }
+    const cdts = [];
+    const inv = findLabel(matrix, s => s.startsWith('cdt investments'));
+    if (inv) {
+      const years = [];
+      (matrix[inv.r] || []).forEach((v, c) => { if (c > inv.c && typeof v === 'number' && v > 1990 && v < 2100) years.push({ c, year: v }); });
+      for (let r = inv.r + 1; r < inv.r + 10; r++) {
+        const label = (matrix[r] || [])[inv.c];
+        if (!isLabel(label)) break;
+        for (const y of years) {
+          const amt = parseAmount((matrix[r] || [])[y.c]);
+          if (amt > 0) cdts.push({ id: 'c' + hashString([label, y.year].join('|')), name: String(label).trim(), year: y.year, amount: round2(amt) });
+        }
+      }
+    }
+    return moves.length || cdts.length ? { moves, cdts } : null;
+  }
+
+  /* Bloque "Saldo Colombia / Ingresos | Egresos": saldo inicial ("Viene …") y movimientos del año
+     que no son traslados, gastos mensuales ni primas (reembolsos, arriendo, viajes…). */
+  function parseCoSummary(matrix, year) {
+    const top = findLabel(matrix, s => s === 'saldo colombia');
+    if (!top) return null;
+    const inc = findLabel(matrix, s => s === 'ingresos');
+    if (!inc || inc.r < top.r || inc.r > top.r + 3) return null;
+    const row = matrix[inc.r] || [];
+    let egc = -1;
+    row.forEach((v, c) => { if (c > inc.c && normalize(v) === 'egresos') egc = c; });
+    let opening = 0;
+    const extras = [];
+    const monthly = /^gastos\s+[a-z]+\s+\d{2}$/;
+    let blank = 0;
+    for (let r = inc.r + 1; r < inc.r + 30; r++) {
+      const cells = matrix[r] || [];
+      const li = cells[inc.c], vi = parseAmount(cells[inc.c + 1]);
+      // Dos filas seguidas sin etiquetas cierran el bloque.
+      if (!isLabel(li) && !(egc >= 0 && isLabel(cells[egc]))) { if (++blank >= 2) break; continue; }
+      blank = 0;
+      if (isLabel(li) && vi > 0) {
+        const n = normalize(li);
+        if (n.startsWith('viene')) opening += vi;
+        else if (n !== 'primas' && !n.startsWith('traslado')) extras.push({ type: 'income', category: String(li).trim(), amount: round2(vi) });
+      }
+      if (egc >= 0) {
+        const le = cells[egc], ve = parseAmount(cells[egc + 1]);
+        if (isLabel(le) && ve > 0) {
+          const n = normalize(le);
+          if (!monthly.test(n) && n !== 'gastos primas') extras.push({ type: 'expense', category: String(le).trim(), amount: round2(ve) });
+        }
+      }
+    }
+    const check = parseAmount((matrix[top.r] || [])[top.c + 1]);
+    const transactions = extras.map(e => Object.assign({ date: year + '-01-01', description: 'Extraordinario ' + year, extra: true }, e));
+    transactions.forEach(t => { t.id = 'k' + hashString([t.type, t.category, t.amount].join('|')); });
+    return { opening: round2(opening), transactions, check: check > 0 ? round2(check) : null };
+  }
+
   /* Reconoce el libro completo. sheets: [{ name, matrix }]. Devuelve null si no es este formato. */
   function parseGastosPH(sheets, opts) {
     opts = opts || {};
@@ -461,19 +554,27 @@
       if (ph && ph.sheet === s.name) continue;
     }
     const year = ph ? ph.year : opts.year || new Date().getFullYear();
+    let savings = null, summary = null;
     for (const s of sheets) {
       if (ph && s.name === ph.sheet) continue;
       if (!co) co = parseCoSheet(s.name, s.matrix, year);
       if (!fx) fx = parseFx(s.matrix, year);
+      if (!savings) savings = parseSavings(s.matrix, year);
+      if (!summary) summary = parseCoSummary(s.matrix, year);
     }
     if (!ph || !co) return null;
-    return { year, ph, co, fx: fx || { transfers: [], referenceRate: null } };
+    return {
+      year, ph, co,
+      fx: fx || { transfers: [], referenceRate: null },
+      savings: savings || { moves: [], cdts: [] },
+      coSummary: summary || { opening: 0, transactions: [], check: null },
+    };
   }
 
   const api = {
     normalize, parseAmount, parseDate, parseMonthHeader, guessMapping, guessHeaderRow,
     rowsToTransactions, wideToTransactions, wideBudgets, guessCategoryColumn, findTableEnd,
-    findBudgetColumn, findExtraColumns, isLabel, parseGastosPH, parseFx, txId, withIds, isIncomeLabel, toISODate,
+    findBudgetColumn, findExtraColumns, isLabel, parseGastosPH, parseFx, parseSavings, parseCoSummary, txId, withIds, isIncomeLabel, toISODate,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Parse = api;

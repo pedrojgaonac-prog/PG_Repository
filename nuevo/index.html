@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Mis Gastos</title>
+  <meta name="description" content="Saldos, gastos, cambio y ahorro de primas entre Filipinas y Colombia.">
+  <meta name="theme-color" content="#0f766e">
+  <link rel="icon" href="../icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../icons/icon-192.png">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></symbol>
+    <symbol id="i-piggy" viewBox="0 0 24 24"><path d="M19 9.5c.8.4 1.5 1.1 2 2M4 11a7 6 0 0 1 7-6h2a7 6 0 0 1 6.6 4H21v4h-1.6A7 6 0 0 1 17 16v3h-3v-2h-4v2H7v-3.3A6 6 0 0 1 4 11zM15 9.5h.01"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><path d="M5 12h.01M12 12h.01M19 12h.01"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><path d="M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14zM21 21l-4.3-4.3"/></symbol>
+  </svg>
+
+  <header class="topbar">
+    <button class="icon-btn hidden" id="backBtn" aria-label="Volver"><svg><use href="#i-back"/></svg></button>
+    <h1 id="viewTitle">Inicio</h1>
+    <div class="month-nav" id="monthNav">
+      <button class="icon-btn" id="prevMonth" aria-label="Mes anterior"><svg><use href="#i-back"/></svg></button>
+      <label class="month-pill"><span id="monthLabel"></span><input type="month" id="monthInput" aria-label="Elegir mes"></label>
+      <button class="icon-btn" id="nextMonth" aria-label="Mes siguiente"><svg><use href="#i-chev"/></svg></button>
+    </div>
+  </header>
+
+  <main>
+    <!-- INICIO -->
+    <section class="view active" id="v-inicio">
+      <div class="banner hidden" id="backupBanner">
+        <span id="backupBannerText"></span>
+        <button class="btn small" id="backupNow">Hacer copia</button>
+      </div>
+
+      <div class="empty hidden" id="emptyState">
+        <h2>Bienvenido</h2>
+        <p>Toca <b>+</b> para anotar tu primer gasto, o importa tu Excel desde <b>Más</b>.</p>
+        <button class="btn primary" data-goto="importar">Importar Excel</button>
+      </div>
+
+      <div class="hero" id="heroSavings" role="button" tabindex="0">
+        <span class="hero-label">Ahorro total</span>
+        <span class="hero-value" id="hSavings">–</span>
+        <span class="hero-sub" id="hSavingsSub"></span>
+        <span class="hero-link">Ver ahorro <svg><use href="#i-chev"/></svg></span>
+      </div>
+
+      <h2 class="section-title">Saldos</h2>
+      <div class="grid-2">
+        <button class="tile" data-open-ledger="co">
+          <span class="tile-head">🇨🇴 Saldo Colombia</span>
+          <span class="tile-value" id="bCo">–</span>
+          <span class="tile-sub" id="bCoSub"></span>
+        </button>
+        <button class="tile" data-open-ledger="ph">
+          <span class="tile-head">🇵🇭 Filipinas <span id="bPhYear"></span></span>
+          <span class="tile-value" id="bPh">–</span>
+          <span class="tile-sub" id="bPhSub"></span>
+        </button>
+      </div>
+
+      <h2 class="section-title">Este mes</h2>
+      <div class="grid-2" id="monthCards"></div>
+
+      <div id="pendingBox">
+        <h2 class="section-title">Pendientes por pagar <span class="count" id="pendingCount"></span></h2>
+        <div class="card list" id="pendingList"></div>
+      </div>
+    </section>
+
+    <!-- GASTOS -->
+    <section class="view" id="v-gastos">
+      <div class="seg" id="ledgerSeg">
+        <button data-ledger="ph">🇵🇭 Filipinas</button>
+        <button data-ledger="co">🇨🇴 Colombia</button>
+      </div>
+
+      <div class="card summary">
+        <div class="summary-top">
+          <div>
+            <span class="label">Gastado</span>
+            <span class="big" id="gSpent">–</span>
+          </div>
+          <span class="delta" id="gDelta"></span>
+        </div>
+        <div class="bar lg hidden" id="gBar"><div class="bar-fill" id="gBarFill"></div></div>
+        <span class="label" id="gBudget"></span>
+        <div class="stats3">
+          <div><span class="label" id="gIncomeLabel">Ingresos</span><b id="gIncome">–</b></div>
+          <div><span class="label">Balance</span><b id="gBalance">–</b></div>
+          <div><span class="label">Pendiente</span><b id="gPending">–</b></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Por categoría</h2><button class="link hidden" id="clearCat">Ver todas</button></div>
+        <div id="catList" class="cat-list"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2 id="txTitle">Movimientos</h2>
+          <button class="btn small ghost" id="repeatMonthBtn" title="Repetir gastos del mes anterior"><svg><use href="#i-repeat"/></svg> Repetir mes</button>
+        </div>
+        <label class="search"><svg><use href="#i-search"/></svg><input type="search" id="txSearch" placeholder="Buscar" aria-label="Buscar"></label>
+        <div id="txList" class="list"></div>
+      </div>
+
+      <details class="card">
+        <summary><h2>Últimos 12 meses</h2></summary>
+        <div class="chart-box"><canvas id="chartTrend" aria-label="Gastos de los últimos 12 meses"></canvas></div>
+      </details>
+    </section>
+
+    <!-- AHORRO -->
+    <section class="view" id="v-ahorro">
+      <div class="hero">
+        <span class="hero-label">Ahorro total</span>
+        <span class="hero-value" id="aTotal">–</span>
+        <span class="hero-sub">Fondo de primas + inversiones (CDT)</span>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>🎁 Fondo de primas</h2><button class="btn small" id="addMove"><svg><use href="#i-plus"/></svg> Movimiento</button></div>
+        <p class="hint">Las primas y bonos que recibes en Colombia, y en qué se usan.</p>
+        <div class="stats4">
+          <div><span class="label">Recibido</span><b id="fIn">–</b></div>
+          <div><span class="label">Usado</span><b id="fOut">–</b></div>
+          <div><span class="label">A inversión</span><b id="fInv">–</b></div>
+          <div><span class="label">Saldo</span><b id="fBal" class="accent">–</b></div>
+        </div>
+        <div class="stack" id="fStack" aria-label="Distribución del fondo"></div>
+        <div class="legend" id="fLegend"></div>
+        <div class="list" id="moveList"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>🏦 Inversiones (CDT)</h2><button class="btn small" id="addCdt"><svg><use href="#i-plus"/></svg> CDT</button></div>
+        <div id="cdtList"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>🇵🇭 Prima en Filipinas <span id="phBonusYear"></span></h2></div>
+        <p class="hint">La columna "Premiums and bonus": de lo que recibes en ₱ a lo que llega al fondo en Colombia.</p>
+        <div id="phBonus" class="flow"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>🇵🇭 Ahorro mensual en Filipinas</h2></div>
+        <div id="phMonthlySaving"></div>
+      </div>
+    </section>
+
+    <!-- CAMBIO -->
+    <section class="view" id="v-cambio">
+      <div class="empty hidden" id="fxEmpty">
+        <h2>Control del cambio</h2>
+        <p>Registra cada envío de pesos filipinos a Colombia para seguir la tasa y el saldo.</p>
+        <button class="btn primary" id="fxAddEmpty">+ Transferencia</button>
+      </div>
+      <div class="fx-data">
+        <div class="grid-2">
+          <div class="tile static"><span class="tile-head">Enviado</span><span class="tile-value" id="fxSent">–</span><span class="tile-sub" id="fxSentSub"></span></div>
+          <div class="tile static"><span class="tile-head">Recibido</span><span class="tile-value" id="fxReceived">–</span><span class="tile-sub" id="fxReceivedSub"></span></div>
+          <div class="tile static"><span class="tile-head">Tasa COP por ₱</span><span class="tile-value" id="fxRate">–</span><span class="tile-sub" id="fxRateSub"></span></div>
+          <div class="tile static"><span class="tile-head">Saldo del mes</span><span class="tile-value" id="fxBalance">–</span><span class="tile-sub" id="fxBalanceSub"></span></div>
+        </div>
+        <div class="card">
+          <h2>Tasa de cambio</h2>
+          <div class="chart-box"><canvas id="chartFx" aria-label="Tasa COP por peso filipino"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Transferencias</h2><button class="btn small" id="fxAdd"><svg><use href="#i-plus"/></svg> Transferencia</button></div>
+          <div class="table-wrap"><table id="fxTable" class="clickable"></table></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MÁS -->
+    <section class="view" id="v-mas">
+      <div class="card list menu">
+        <button class="row" data-goto="presupuestos"><span>◎ Presupuestos</span><svg><use href="#i-chev"/></svg></button>
+        <button class="row" data-goto="importar"><span>⇪ Importar Excel</span><svg><use href="#i-chev"/></svg></button>
+        <button class="row" id="exportXlsx"><span>⇩ Exportar a Excel</span><svg><use href="#i-chev"/></svg></button>
+        <button class="row" id="exportJson"><span>⛉ Copia de seguridad</span><svg><use href="#i-chev"/></svg></button>
+        <label class="row"><span>↺ Restaurar copia</span><svg><use href="#i-chev"/></svg><input type="file" id="importJson" accept=".json,application/json" hidden></label>
+      </div>
+      <p class="hint pad" id="lastBackupText"></p>
+
+      <div class="card">
+        <h2>Ajustes</h2>
+        <div class="form">
+          <label>Moneda 🇵🇭 Filipinas <select data-currency="ph"></select></label>
+          <label>Moneda 🇨🇴 Colombia <select data-currency="co"></select></label>
+          <label>Saldo inicial Colombia (COP)<input type="number" step="0.01" inputmode="decimal" data-opening="co"></label>
+          <label>Saldo inicial Filipinas (₱)<input type="number" step="0.01" inputmode="decimal" data-opening="ph"></label>
+          <label>Tasa de referencia (COP por ₱)<input type="number" id="fxReference" step="0.0001" min="0" inputmode="decimal" placeholder="Opcional"></label>
+        </div>
+      </div>
+      <div class="card">
+        <button class="btn danger" id="clearAll">Borrar todos los datos</button>
+      </div>
+    </section>
+
+    <!-- PRESUPUESTOS (desde Más) -->
+    <section class="view" id="v-presupuestos">
+      <div class="seg" id="ledgerSegB">
+        <button data-ledger="ph">🇵🇭 Filipinas</button>
+        <button data-ledger="co">🇨🇴 Colombia</button>
+      </div>
+      <div class="card">
+        <p class="hint">Presupuesto mensual por categoría. Vacío = sin límite.</p>
+        <div id="budgetForm" class="budget-form"></div>
+        <div class="row-add">
+          <input type="text" id="newCategory" placeholder="Nueva categoría" aria-label="Nueva categoría">
+          <button class="btn" id="addCategoryBtn">Agregar</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- IMPORTAR (desde Más) -->
+    <section class="view" id="v-importar">
+      <div class="card">
+        <label class="dropzone" id="dropzone">
+          <input type="file" id="fileInput" accept=".xlsx,.xls,.xlsm,.csv,.ods" hidden>
+          <b>Elige tu Excel</b>
+          <span>o arrástralo aquí</span>
+          <small id="fileName"></small>
+        </label>
+      </div>
+
+      <div class="card hidden" id="quickImport">
+        <h2>Tu libro de gastos</h2>
+        <ul class="quick-list" id="quickSummary"></ul>
+        <button class="btn primary block" id="quickImportBtn">Importar todo</button>
+        <button class="link" id="quickManual">Configurar a mano</button>
+        <p class="hint">Reemplaza lo importado antes de este libro; lo que agregaste a mano se conserva.</p>
+      </div>
+
+      <div class="card hidden" id="importStep2">
+        <h2>Configura cómo leerlo</h2>
+        <div class="form">
+          <label>Importar al controlador
+            <select id="importLedger"><option value="ph">🇵🇭 Filipinas</option><option value="co">🇨🇴 Colombia</option></select>
+          </label>
+          <label>Hoja <select id="sheetSelect"></select></label>
+          <label>Fila de encabezados <input type="number" id="headerRow" min="1" value="1"></label>
+          <label>Formato de la hoja
+            <select id="layoutSelect">
+              <option value="rows">Una fila por gasto</option>
+              <option value="wide">Tabla mensual (meses en columnas)</option>
+            </select>
+          </label>
+        </div>
+        <div id="mapRows" class="form">
+          <label>Columna de fecha <select data-map="date"></select></label>
+          <label>Columna de monto <select data-map="amount"></select></label>
+          <label>Columna de categoría <select data-map="category"></select></label>
+          <label>Columna de descripción <select data-map="description"></select></label>
+          <label>Columna de tipo <select data-map="type"></select></label>
+          <label>Montos negativos son
+            <select id="negativeMeans"><option value="expense">Gasto</option><option value="income">Ingreso</option></select>
+          </label>
+        </div>
+        <div id="mapWide" class="form hidden">
+          <label>Columna de categoría <select data-map="wideCategory"></select></label>
+          <label>Año <input type="number" id="wideYear" min="1990" max="2100"></label>
+          <label>Leer hasta la fila <input type="number" id="wideEndRow" min="1"></label>
+          <label>Presupuesto desde la columna <select data-map="wideBudget"></select></label>
+          <p class="hint" id="wideMonthsHint"></p>
+          <div id="wideExtras"></div>
+        </div>
+        <h3>Vista previa</h3>
+        <div class="table-wrap"><table id="previewTable"></table></div>
+        <p class="hint" id="previewSummary"></p>
+        <div class="form">
+          <label>Al importar
+            <select id="importMode">
+              <option value="sync">Actualizar lo importado antes desde esta hoja</option>
+              <option value="merge">Agregar (sin duplicar)</option>
+              <option value="replace">Reemplazar todo el controlador</option>
+            </select>
+          </label>
+        </div>
+        <button class="btn primary block" id="doImport">Importar</button>
+      </div>
+    </section>
+  </main>
+
+  <button class="fab" id="fabAdd" aria-label="Agregar gasto"><svg><use href="#i-plus"/></svg></button>
+
+  <nav class="tabbar" aria-label="Secciones">
+    <button data-view="inicio" class="active"><svg><use href="#i-home"/></svg>Inicio</button>
+    <button data-view="gastos"><svg><use href="#i-list"/></svg>Gastos</button>
+    <button data-view="ahorro"><svg><use href="#i-piggy"/></svg>Ahorro</button>
+    <button data-view="cambio"><svg><use href="#i-swap"/></svg>Cambio</button>
+    <button data-view="mas"><svg><use href="#i-more"/></svg>Más</button>
+  </nav>
+
+  <!-- Diálogos -->
+  <dialog id="txDialog">
+    <form method="dialog" id="txForm">
+      <h2 id="txDialogTitle">Nuevo gasto</h2>
+      <div class="seg small" id="txLedgerSeg">
+        <button type="button" data-ledger="ph">🇵🇭 Filipinas</button>
+        <button type="button" data-ledger="co">🇨🇴 Colombia</button>
+      </div>
+      <div class="seg small" id="txTypeSeg">
+        <button type="button" data-type="expense">Gasto</button>
+        <button type="button" data-type="income">Ingreso</button>
+      </div>
+      <input type="hidden" name="type">
+      <label class="amount-field"><span id="txCurrency">₱</span><input type="number" name="amount" step="0.01" min="0" required inputmode="decimal" placeholder="0"></label>
+      <label>Categoría <input type="text" name="category" list="categoryOptions" required autocomplete="off"></label>
+      <div class="chips" id="catChips"></div>
+      <label>Descripción <input type="text" name="description" placeholder="Opcional"></label>
+      <label>Fecha <input type="date" name="date" required></label>
+      <label class="check"><input type="checkbox" name="pending"> Pendiente de pago</label>
+      <label class="check"><input type="checkbox" name="extra"> Extraordinario (no cuenta en el mes, sí en el saldo)</label>
+      <datalist id="categoryOptions"></datalist>
+      <div class="btn-row">
+        <button type="button" class="btn danger hidden" id="txDelete">Eliminar</button>
+        <span class="spacer"></span>
+        <button value="cancel" formnovalidate class="btn">Cancelar</button>
+        <button value="save" class="btn primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="fxDialog">
+    <form method="dialog" id="fxForm">
+      <h2 id="fxDialogTitle">Nueva transferencia</h2>
+      <label>Fecha <input type="date" name="date" required></label>
+      <label>Pesos filipinos enviados (₱) <input type="number" name="php" step="0.01" min="0" required inputmode="decimal"></label>
+      <label>Dólares intermedios (US$, opcional) <input type="number" name="usd" step="0.01" min="0" inputmode="decimal"></label>
+      <label>Pesos colombianos recibidos (COP) <input type="number" name="cop" step="0.01" min="0" required inputmode="decimal"></label>
+      <p class="hint" id="fxFormRate"></p>
+      <div class="btn-row">
+        <button type="button" class="btn danger hidden" id="fxDelete">Eliminar</button>
+        <span class="spacer"></span>
+        <button value="cancel" formnovalidate class="btn">Cancelar</button>
+        <button value="save" class="btn primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="moveDialog">
+    <form method="dialog" id="moveForm">
+      <h2 id="moveDialogTitle">Movimiento del fondo</h2>
+      <label>Tipo
+        <select name="kind">
+          <option value="in">Aporte (prima o bono que entra)</option>
+          <option value="out">Uso (sale del fondo)</option>
+          <option value="invest">Inversión (pasa a CDT)</option>
+        </select>
+      </label>
+      <label>Concepto <input type="text" name="concept" required placeholder="Ej. Leave Premium, U Santy"></label>
+      <label>Monto (COP) <input type="number" name="amount" step="0.01" min="0" required inputmode="decimal"></label>
+      <label>Fecha <input type="date" name="date" required></label>
+      <div class="btn-row">
+        <button type="button" class="btn danger hidden" id="moveDelete">Eliminar</button>
+        <span class="spacer"></span>
+        <button value="cancel" formnovalidate class="btn">Cancelar</button>
+        <button value="save" class="btn primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="cdtDialog">
+    <form method="dialog" id="cdtForm">
+      <h2 id="cdtDialogTitle">Inversión (CDT)</h2>
+      <label>Nombre <input type="text" name="name" required placeholder="Ej. CDT Dary"></label>
+      <label>Año <input type="number" name="year" min="1990" max="2100" required></label>
+      <label>Monto (COP) <input type="number" name="amount" step="0.01" min="0" required inputmode="decimal"></label>
+      <div class="btn-row">
+        <button type="button" class="btn danger hidden" id="cdtDelete">Eliminar</button>
+        <span class="spacer"></span>
+        <button value="cancel" formnovalidate class="btn">Cancelar</button>
+        <button value="save" class="btn primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="../vendor/xlsx.full.min.js"></script>
+  <script src="../vendor/chart.umd.min.js"></script>
+  <script src="../js/parse.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

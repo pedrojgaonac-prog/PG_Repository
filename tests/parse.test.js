@@ -149,7 +149,7 @@ test('columna extra asignada a un mes y negativos como reintegro', () => {
   const rows = m.slice(2, 12);
   const r = P.wideToTransactions(m[1], rows, 0, 2026, { extraColumns: { 7: '2026-03' } });
   const extra = r.transactions.filter(t => t.description === 'Premiums and bonus');
-  assert.equal(extra.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0), 200);
+  assert.equal(extra.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0), 230, 'incluye la fila sin nombre');
   assert.deepEqual(extra.filter(t => t.type === 'income').map(t => [t.category, t.amount]).sort(), [['SUELDO', 5000], ['Viene 2025', 700]]);
   assert.ok(extra.every(t => t.date === '2026-03-01'));
 });
@@ -202,4 +202,51 @@ test('parseMonthHeader tolera errores con loose', () => {
   assert.equal(P.parseMonthHeader('Febreruary'), null);
   assert.deepEqual(P.parseMonthHeader('Febreruary', true), { year: null, month: 1 });
   assert.equal(P.parseMonthHeader('Marca', true), null);
+});
+
+test('fondo de primas, CDTs y bloque "Saldo Colombia"', () => {
+  const m = [];
+  m[0] = [null, null, null, null, null, 'CDT Investments', 2025, 2026];
+  m[1] = [null, null, null, null, null, 'CDTdary', 20000000, 10000000];
+  m[2] = ['Saldo Colombia', 9000, null, null, null, 'CDTPedro', 25000000, 20000000];
+  m[3] = ['Ingresos', 100000, null, 'Egresos', 91000];
+  m[4] = ['Viene 2025', 5000, null, 'Viaje Col', 1000];
+  m[5] = ['Primas', 80000, null, 'Gastos Primas', 70000];
+  m[7] = ['Traslado 20/01/2026', 10000, null, 'Gastos Ene 26', 9000];
+  m[8] = ['Reembolsos', 4000, null, 'otros', 500];
+  m[11] = [null, null, null, 'Calculo IMA Original', 72.3];
+  m[20] = [null, null, null, null, null, null, 'STIC 22/04/2025', 50000];
+  m[21] = [null, null, null, null, null, null, 'Leave Premium', 30000];
+  m[22] = [null, null, null, null, null, null, 'House allowances', null];
+  m[30] = [null, null, null, null, null, null, 'GASTOS Primas'];
+  m[31] = [null, null, null, null, null, null, 'U Santy', 6000];
+  m[32] = [null, null, null, null, null, null, 'CDT 2026', 24000];
+
+  const sv = P.parseSavings(m, 2026);
+  assert.deepEqual(sv.moves.map(x => [x.type, x.concept, x.amount, !!x.invest]), [
+    ['in', 'STIC 22/04/2025', 50000, false], ['in', 'Leave Premium', 30000, false],
+    ['out', 'U Santy', 6000, false], ['out', 'CDT 2026', 24000, true],
+  ]);
+  assert.equal(sv.moves[0].date, '2025-04-22');
+  assert.deepEqual(sv.cdts.map(c => [c.name, c.year, c.amount]), [
+    ['CDTdary', 2025, 20000000], ['CDTdary', 2026, 10000000], ['CDTPedro', 2025, 25000000], ['CDTPedro', 2026, 20000000],
+  ]);
+
+  const cs = P.parseCoSummary(m, 2026);
+  assert.equal(cs.opening, 5000);
+  assert.equal(cs.check, 9000);
+  assert.deepEqual(cs.transactions.map(t => [t.type, t.category, t.amount]).sort(), [
+    ['expense', 'Viaje Col', 1000], ['expense', 'otros', 500], ['income', 'Reembolsos', 4000],
+  ]);
+  assert.ok(cs.transactions.every(t => t.extra));
+});
+
+test('la columna de primas de Filipinas sale como movimientos extraordinarios', () => {
+  const r = P.parseGastosPH([{ name: '2026', matrix: budgetSheet() }, { name: 'Mes', matrix: colombiaSheet() }]);
+  const ex = r.ph.extraTransactions;
+  assert.ok(ex.length && ex.every(t => t.extra && t.description === 'Premiums and bonus'));
+  assert.equal(ex[0].date, '2026-03-01', 'después de FEB, la columna anterior');
+  const net = ex.reduce((s, t) => s + (t.type === 'income' ? t.amount : -t.amount), 0);
+  assert.equal(net, 5000 + 700 - 230);
+  assert.ok(!r.ph.transactions.some(t => t.description === 'Premiums and bonus'), 'no se mezcla con los meses');
 });
